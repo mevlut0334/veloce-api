@@ -13,14 +13,16 @@ return new class extends Migration
     {
          Schema::create('tags', function (Blueprint $table) {
             $table->id();
-            $table->string('name');
-            $table->string('slug')->unique();
+            $table->string('name', 50);
+            $table->string('slug', 60)->unique();
             $table->boolean('is_active')->default(true);
+            $table->unsignedInteger('usage_count')->default(0);
             $table->timestamps();
 
-            // Indexes
-            $table->index('slug');
-            $table->index('is_active');
+            // Aktif tagleri kullanım sayısına göre sırala
+            $table->index(['is_active', 'usage_count']);
+
+            // slug unique zaten index
         });
     }
 

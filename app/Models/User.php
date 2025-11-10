@@ -6,16 +6,20 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\Cache;
 
 class User extends Authenticatable
 {
     use HasApiTokens, HasFactory, Notifiable;
 
-    /**
-     * The attributes that are mass assignable.
-     *
-     * @var array<int, string>
-     */
+    // Cache süreleri (dakika)
+    const CACHE_SUBSCRIPTION_TTL = 10;
+    const CACHE_STATS_TTL = 30;
+
     protected $fillable = [
         'name',
         'email',
@@ -25,143 +29,306 @@ class User extends Authenticatable
         'last_activity_at',
     ];
 
-    /**
-     * The attributes that should be hidden for serialization.
-     *
-     * @var array<int, string>
-     */
     protected $hidden = [
         'password',
         'remember_token',
     ];
 
-    /**
-     * Get the attributes that should be cast.
-     *
-     * @return array<string, string>
-     */
-    protected function casts(): array
+    protected $appends = [];
+
+    // Performans: Cast'leri method yerine property olarak tanımla (PHP 8.0+)
+    protected $casts = [
+        'email_verified_at' => 'datetime',
+        'password' => 'hashed',
+        'is_active' => 'boolean',
+        'last_activity_at' => 'datetime',
+    ];
+
+    // Performans: Sık kullanılan ilişkileri eager load et (opsiyonel)
+    // protected $with = ['activeSubscription']; // Dikkatli kullan!
+
+    // ============================================
+    // İLİŞKİLER - Optimize Edilmiş
+    // ============================================
+
+    public function userSubscriptions(): HasMany
     {
-        return [
-            'email_verified_at' => 'datetime',
-            'password' => 'hashed',
-            'is_active' => 'boolean',
-            'last_activity_at' => 'datetime',
-        ];
+        return $this->hasMany(UserSubscription::class)
+            ->select(['id', 'user_id', 'plan_id', 'status', 'starts_at', 'expires_at']); // Sadece gerekli kolonlar
     }
 
-    // İlişkiler
-
-    public function userSubscriptions()
-    {
-        return $this->hasMany(UserSubscription::class);
-    }
-
-    public function subscription()
-    {
-        return $this->hasOne(UserSubscription::class)->latest();
-    }
-
-    public function activeSubscription()
+    public function subscription(): HasOne
     {
         return $this->hasOne(UserSubscription::class)
+            ->select(['id', 'user_id', 'plan_id', 'status', 'starts_at', 'expires_at'])
+            ->latest('created_at');
+    }
+
+    public function activeSubscription(): HasOne
+    {
+        return $this->hasOne(UserSubscription::class)
+            ->select(['id', 'user_id', 'plan_id', 'status', 'starts_at', 'expires_at'])
             ->where('status', 'active')
             ->where('expires_at', '>', now());
     }
 
-    public function payments()
+    public function payments(): HasMany
     {
-        return $this->hasMany(Payment::class);
+        return $this->hasMany(Payment::class)
+            ->select(['id', 'user_id', 'amount', 'status', 'created_at']); // Sadece gerekli kolonlar
     }
 
-    public function playlists()
+    public function playlists(): HasMany
     {
-        return $this->hasMany(UserPlaylist::class);
+        return $this->hasMany(UserPlaylist::class)
+            ->select(['id', 'user_id', 'name', 'created_at']);
     }
 
-    public function favorites()
+    public function favorites(): BelongsToMany
     {
         return $this->belongsToMany(Video::class, 'user_favorites')
+            ->select(['videos.id', 'title', 'slug', 'thumbnail']) // Sadece gerekli kolonlar
             ->withTimestamps();
     }
 
-    public function views()
+    public function views(): HasMany
     {
-        return $this->hasMany(VideoView::class);
+        return $this->hasMany(VideoView::class)
+            ->select(['id', 'user_id', 'video_id', 'viewed_at', 'watch_duration']);
     }
 
-    // Scope'lar
+    // ============================================
+    // SCOPE'LAR - Performans Optimizasyonlu
+    // ============================================
 
-    public function scopeSubscribers($query)
-    {
-        return $query->whereHas('activeSubscription');
-    }
-
-    public function scopeNonSubscribers($query)
-    {
-        return $query->whereDoesntHave('activeSubscription');
-    }
-
-    public function scopeActive($query)
+    public function scopeActive(Builder $query): Builder
     {
         return $query->where('is_active', true);
     }
 
-    public function scopeInactive($query)
+    public function scopeInactive(Builder $query): Builder
     {
         return $query->where('is_active', false);
     }
 
-    // Helper metodlar
-
-    public function isSubscriber(): bool
+    /**
+     * BEST PRACTICE: whereExists kullanımı (whereHas'ten daha hızlı)
+     */
+    public function scopeSubscribers(Builder $query): Builder
     {
-        return $this->activeSubscription()->exists();
+        return $query->whereExists(function ($q) {
+            $q->select(\DB::raw(1))
+                ->from('user_subscriptions')
+                ->whereColumn('user_subscriptions.user_id', 'users.id')
+                ->where('status', 'active')
+                ->where('expires_at', '>', now());
+        });
     }
 
+    public function scopeNonSubscribers(Builder $query): Builder
+    {
+        return $query->whereNotExists(function ($q) {
+            $q->select(\DB::raw(1))
+                ->from('user_subscriptions')
+                ->whereColumn('user_subscriptions.user_id', 'users.id')
+                ->where('status', 'active')
+                ->where('expires_at', '>', now());
+        });
+    }
+
+    /**
+     * JOIN ile optimized scope (daha da hızlı, subscription data'ya erişim gerekirse)
+     */
+    public function scopeSubscribersWithData(Builder $query): Builder
+    {
+        return $query->join('user_subscriptions', function ($join) {
+            $join->on('user_subscriptions.user_id', '=', 'users.id')
+                ->where('user_subscriptions.status', 'active')
+                ->where('user_subscriptions.expires_at', '>', now());
+        })->select('users.*', 'user_subscriptions.expires_at as subscription_expires_at');
+    }
+
+    public function scopeRecentActivity(Builder $query, int $days = 30): Builder
+    {
+        return $query->where('last_activity_at', '>', now()->subDays($days));
+    }
+
+    // ============================================
+    // HELPER METODLAR - Cache ile Optimize Edilmiş
+    // ============================================
+
+    /**
+     * Cache'lenmiş subscriber kontrolü
+     */
+    public function isSubscriber(): bool
+    {
+        // İlişki yüklüyse DB'ye gitme
+        if ($this->relationLoaded('activeSubscription')) {
+            return $this->activeSubscription !== null;
+        }
+
+        // Cache kullan
+        return Cache::remember(
+            "user_{$this->id}_is_subscriber",
+            now()->addMinutes(self::CACHE_SUBSCRIPTION_TTL),
+            fn() => $this->activeSubscription()->exists()
+        );
+    }
+
+    /**
+     * Video erişim kontrolü - Optimize edilmiş
+     */
     public function hasAccessToVideo(Video $video): bool
     {
-        // Premium değilse herkes erişebilir
+        // Free video kontrolü (ucuz)
         if (!$video->is_premium) {
             return true;
         }
 
-        // Premium ise sadece abone olanlar erişebilir
+        // Premium kontrolü
         return $this->isSubscriber();
     }
 
-    public function getSubscriptionStatusAttribute(): string
+    /**
+     * Subscription durumu - Cache'lenmiş
+     */
+    public function subscriptionStatus(): string
     {
-        if ($this->isSubscriber()) {
-            return 'active';
+        if ($this->relationLoaded('activeSubscription')) {
+            if ($this->activeSubscription) {
+                return 'active';
+            }
+
+            if ($this->relationLoaded('userSubscriptions') && $this->userSubscriptions->isNotEmpty()) {
+                return 'expired';
+            }
         }
 
-        if ($this->userSubscriptions()->exists()) {
-            return 'expired';
-        }
+        return Cache::remember(
+            "user_{$this->id}_subscription_status",
+            now()->addMinutes(self::CACHE_SUBSCRIPTION_TTL),
+            function () {
+                if ($this->activeSubscription()->exists()) {
+                    return 'active';
+                }
 
-        return 'none';
+                if ($this->userSubscriptions()->exists()) {
+                    return 'expired';
+                }
+
+                return 'none';
+            }
+        );
     }
 
-    public function getSubscriptionExpiryAttribute(): ?string
+    /**
+     * Subscription bitiş tarihi
+     */
+    public function subscriptionExpiry(): ?string
     {
-        $activeSub = $this->activeSubscription;
+        $activeSub = $this->relationLoaded('activeSubscription')
+            ? $this->activeSubscription
+            : $this->activeSubscription()->first();
 
-        if ($activeSub) {
-            return $activeSub->expires_at->format('d.m.Y H:i');
-        }
-
-        return null;
+        return $activeSub?->expires_at?->format('d.m.Y H:i');
     }
 
-    public function getRemainingSubscriptionDaysAttribute(): int
+    /**
+     * Kalan gün sayısı
+     */
+    public function remainingSubscriptionDays(): int
     {
-        $activeSub = $this->activeSubscription;
+        $activeSub = $this->relationLoaded('activeSubscription')
+            ? $this->activeSubscription
+            : $this->activeSubscription()->first();
 
-        if ($activeSub) {
-            return now()->diffInDays($activeSub->expires_at);
+        if (!$activeSub?->expires_at) {
+            return 0;
         }
 
-        return 0;
+        $days = now()->diffInDays($activeSub->expires_at, false);
+        return max(0, (int) $days);
+    }
+
+    /**
+     * Cache temizleme
+     */
+    public function clearSubscriptionCache(): void
+    {
+        Cache::forget("user_{$this->id}_is_subscriber");
+        Cache::forget("user_{$this->id}_subscription_status");
+    }
+
+    /**
+     * Toplu veri yükleme - Optimize edilmiş
+     */
+    public function loadSubscriptionData(): self
+    {
+        return $this->load([
+            'activeSubscription' => fn($q) => $q->select(['id', 'user_id', 'plan_id', 'status', 'expires_at'])
+        ]);
+    }
+
+    /**
+     * Dashboard için gerekli tüm data'yı yükle
+     */
+    public function loadDashboardData(): self
+    {
+        return $this->load([
+            'activeSubscription:id,user_id,plan_id,status,expires_at',
+            'playlists:id,user_id,name,created_at',
+            'favorites:id,title,slug,thumbnail'
+        ]);
+    }
+
+    // ============================================
+    // EVENTS - Cache Yönetimi
+    // ============================================
+
+    protected static function booted(): void
+    {
+        // Subscription güncellendiğinde cache temizle
+        static::updated(function (User $user) {
+            if ($user->wasChanged(['is_active'])) {
+                $user->clearSubscriptionCache();
+            }
+        });
+
+        static::deleted(function (User $user) {
+            $user->clearSubscriptionCache();
+        });
+    }
+
+    // ============================================
+    // İSTATİSTİK METODLARI - Cache'lenmiş
+    // ============================================
+
+    /**
+     * Kullanıcı istatistikleri
+     */
+    public function getStats(): array
+    {
+        return Cache::remember(
+            "user_{$this->id}_stats",
+            now()->addMinutes(self::CACHE_STATS_TTL),
+            fn() => [
+                'total_views' => $this->views()->count(),
+                'total_playlists' => $this->playlists()->count(),
+                'total_favorites' => $this->favorites()->count(),
+                'watch_time_minutes' => $this->views()->sum('watch_duration'),
+            ]
+        );
+    }
+
+    /**
+     * Son aktiviteleri getir
+     */
+    public function recentViews(int $limit = 10)
+    {
+        return $this->views()
+            ->with('video:id,title,slug,thumbnail')
+            ->latest('viewed_at')
+            ->limit($limit)
+            ->get();
     }
 }

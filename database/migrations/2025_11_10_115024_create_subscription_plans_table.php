@@ -10,12 +10,17 @@ return new class extends Migration
     {
         Schema::create('subscription_plans', function (Blueprint $table) {
             $table->id();
-            $table->string('name')->default('Yıllık Premium');
-            $table->decimal('price', 10, 2);
-            $table->integer('duration_days')->default(365);
-            $table->text('description')->nullable();
-            $table->boolean('is_active')->default(true);
+            $table->string('name', 100)->default('Yıllık Premium');
+            $table->decimal('price', 10, 2)->unsigned();
+            $table->smallInteger('duration_days')->unsigned()->default(365);
+            $table->string('description', 500)->nullable();
+            $table->boolean('is_active')->default(true)->index();
             $table->timestamps();
+
+            // Aktif planları hızlı sorgulamak için
+            $table->index(['is_active', 'price']);
+            // Plan adı aramaları için (opsiyonel - ihtiyaç varsa)
+            // $table->index('name');
         });
     }
 

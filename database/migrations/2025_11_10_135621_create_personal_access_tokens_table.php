@@ -14,12 +14,16 @@ return new class extends Migration
         Schema::create('personal_access_tokens', function (Blueprint $table) {
             $table->id();
             $table->morphs('tokenable');
-            $table->text('name');
-            $table->string('token', 64)->unique();
+            $table->string('name', 100);
+            $table->char('token', 64)->unique();
             $table->text('abilities')->nullable();
             $table->timestamp('last_used_at')->nullable();
-            $table->timestamp('expires_at')->nullable()->index();
-            $table->timestamps();
+            $table->timestamp('expires_at')->nullable();
+            $table->timestamp('created_at')->useCurrent();
+            $table->timestamp('updated_at')->useCurrent()->useCurrentOnUpdate();
+
+            // Composite index for token validation
+            $table->index(['tokenable_type', 'tokenable_id', 'expires_at']);
         });
     }
 

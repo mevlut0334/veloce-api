@@ -13,22 +13,31 @@ return new class extends Migration
     {
         Schema::create('payments', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('user_id')->constrained()->onDelete('cascade');
-            $table->foreignId('subscription_plan_id')->constrained()->onDelete('cascade');
-            $table->decimal('amount', 10, 2); // Ödeme tutarı
-            $table->string('currency', 3)->default('TRY'); // Para birimi
-            $table->string('payment_method'); // Ödeme yöntemi (credit_card, paypal, vb)
-            $table->string('transaction_id')->unique(); // Benzersiz işlem ID'si
+            $table->unsignedBigInteger('user_id');
+            $table->unsignedBigInteger('subscription_plan_id');
+            $table->decimal('amount', 10, 2);
+            $table->char('currency', 3)->default('TRY');
+            $table->string('payment_method', 50);
+            $table->string('transaction_id', 100)->unique();
             $table->enum('status', ['pending', 'completed', 'failed', 'refunded'])->default('pending');
-            $table->text('payment_details')->nullable(); // JSON olarak ödeme detayları
-            $table->timestamp('paid_at')->nullable(); // Ödeme tarihi
-            $table->timestamps();
+            $table->text('payment_details')->nullable();
+            $table->timestamp('paid_at')->nullable();
+            $table->timestamp('created_at')->useCurrent();
+            $table->timestamp('updated_at')->useCurrent()->useCurrentOnUpdate();
 
-            // Performans için indexler
-            $table->index('user_id');
-            $table->index('status');
-            $table->index('paid_at');
-            $table->index(['user_id', 'status']);
+            // Composite indexes
+            $table->index(['user_id', 'status', 'paid_at']);
+            $table->index(['status', 'paid_at']);
+            $table->index('subscription_plan_id');
+
+            // Foreign keys
+            $table->foreign('user_id', 'fk_payments_user')
+                  ->references('id')->on('users')
+                  ->onDelete('cascade');
+
+            $table->foreign('subscription_plan_id', 'fk_payments_plan')
+                  ->references('id')->on('subscription_plans')
+                  ->onDelete('cascade');
         });
     }
 

@@ -13,15 +13,23 @@ return new class extends Migration
     {
        Schema::create('user_playlists', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('user_id')->constrained()->onDelete('cascade');
-            $table->string('name');
+            $table->unsignedBigInteger('user_id');
+            $table->string('name', 100); // String length limit
             $table->text('description')->nullable();
             $table->boolean('is_public')->default(false);
-            $table->timestamps();
+            $table->timestamp('created_at')->useCurrent();
+            $table->timestamp('updated_at')->useCurrent()->useCurrentOnUpdate();
 
-            // Indexes
-            $table->index('user_id');
-            $table->index('is_public');
+            // Composite index - user'ın public/private playlist'lerini filtrelemek için
+            $table->index(['user_id', 'is_public']);
+
+            // Public playlist'leri listelemek için (is_public filtreleme öncelikli)
+            $table->index(['is_public', 'created_at']);
+
+            // Foreign key
+            $table->foreign('user_id', 'fk_user_playlists_user')
+                  ->references('id')->on('users')
+                  ->onDelete('cascade');
         });
     }
 

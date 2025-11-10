@@ -13,18 +13,25 @@ return new class extends Migration
     {
          Schema::create('playlist_video', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('user_playlist_id')->constrained()->onDelete('cascade');
-            $table->foreignId('video_id')->constrained()->onDelete('cascade');
-            $table->integer('order')->default(0); // playlist içinde sıralama
-            $table->timestamps();
+            $table->unsignedBigInteger('user_playlist_id');
+            $table->unsignedBigInteger('video_id');
+            $table->unsignedSmallInteger('order')->default(0);
+            $table->timestamp('created_at')->useCurrent();
+            $table->timestamp('updated_at')->useCurrent()->useCurrentOnUpdate();
 
-            // Unique constraint
+            // Composite unique + ordering index
             $table->unique(['user_playlist_id', 'video_id']);
-
-            // Indexes
-            $table->index('user_playlist_id');
+            $table->index(['user_playlist_id', 'order']);
             $table->index('video_id');
-            $table->index('order');
+
+            // Foreign keys
+            $table->foreign('user_playlist_id', 'fk_playlist_video_playlist')
+                  ->references('id')->on('user_playlists')
+                  ->onDelete('cascade');
+
+            $table->foreign('video_id', 'fk_playlist_video_video')
+                  ->references('id')->on('videos')
+                  ->onDelete('cascade');
         });
     }
 

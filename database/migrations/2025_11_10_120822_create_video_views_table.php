@@ -13,19 +13,28 @@ return new class extends Migration
     {
         Schema::create('video_views', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('video_id')->constrained()->onDelete('cascade');
-            $table->foreignId('user_id')->nullable()->constrained()->onDelete('set null');
-            $table->string('ip_address')->nullable();
-            $table->integer('watch_duration')->default(0); // izlenen süre (saniye)
-            $table->boolean('is_completed')->default(false); // video sonuna kadar izlendi mi
-            $table->timestamp('viewed_at');
-            $table->timestamps();
+            $table->unsignedBigInteger('video_id');
+            $table->unsignedBigInteger('user_id')->nullable();
+            $table->ipAddress('ip_address')->nullable();
+            $table->unsignedMediumInteger('watch_duration')->default(0);
+            $table->boolean('is_completed')->default(false);
+            $table->timestamp('viewed_at')->useCurrent();
+            $table->timestamp('created_at')->useCurrent();
+            $table->timestamp('updated_at')->useCurrent()->useCurrentOnUpdate();
 
-            // Indexes
-            $table->index('video_id');
-            $table->index('user_id');
-            $table->index('viewed_at');
-            $table->index(['video_id', 'viewed_at']); // istatistikler için composite index
+            // Composite indexes
+            $table->index(['video_id', 'viewed_at']);
+            $table->index(['user_id', 'viewed_at']);
+            $table->index(['video_id', 'is_completed']);
+
+            // Foreign keys
+            $table->foreign('video_id', 'fk_video_views_video')
+                  ->references('id')->on('videos')
+                  ->onDelete('cascade');
+
+            $table->foreign('user_id', 'fk_video_views_user')
+                  ->references('id')->on('users')
+                  ->onDelete('set null');
         });
     }
 

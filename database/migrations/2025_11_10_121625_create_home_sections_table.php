@@ -13,13 +13,17 @@ return new class extends Migration
     {
        Schema::create('home_sections', function (Blueprint $table) {
             $table->id();
-            $table->string('title'); // Bölüm başlığı (örn: "En Çok İzlenenler")
-            $table->enum('content_type', ['video_ids', 'category', 'trending', 'recent']); // İçerik tipi
-            $table->text('content_data')->nullable(); // video_ids için JSON array, category için category_id
-            $table->integer('order')->default(0); // Sıralama
-            $table->boolean('is_active')->default(true); // Aktif/Pasif
-            $table->integer('limit')->default(20); // Gösterilecek video sayısı
-            $table->timestamps();
+            $table->string('title', 100);
+            $table->enum('content_type', ['video_ids', 'category', 'trending', 'recent']);
+            $table->text('content_data')->nullable();
+            $table->unsignedSmallInteger('order')->default(0);
+            $table->boolean('is_active')->default(true);
+            $table->unsignedTinyInteger('limit')->default(20);
+            $table->timestamp('created_at')->useCurrent();
+            $table->timestamp('updated_at')->useCurrent()->useCurrentOnUpdate();
+
+            // Composite index for active sections ordered
+            $table->index(['is_active', 'order']);
         });
     }
 

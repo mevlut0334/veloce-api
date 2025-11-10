@@ -13,18 +13,18 @@ return new class extends Migration
     {
          Schema::create('categories', function (Blueprint $table) {
             $table->id();
-            $table->string('name');
-            $table->string('slug')->unique();
-            $table->text('description')->nullable();
-            $table->string('icon')->nullable(); // kategori ikonu
-            $table->integer('order')->default(0); // sıralama için
+            $table->string('name', 100);
+            $table->string('slug', 150)->unique();
+            $table->string('description', 500)->nullable();
+            $table->string('icon', 100)->nullable()->comment('icon class or path');
+            $table->smallInteger('order')->unsigned()->default(0);
             $table->boolean('is_active')->default(true);
             $table->timestamps();
 
-            // Indexes
-            $table->index('slug');
-            $table->index('is_active');
-            $table->index('order');
+            // Composite index - aktif kategorileri sıralı göstermek için
+            $table->index(['is_active', 'order']);
+
+            // slug unique zaten index oluşturur, tekrar eklemeye gerek yok
         });
     }
 

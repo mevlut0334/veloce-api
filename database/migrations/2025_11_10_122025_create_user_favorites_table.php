@@ -13,16 +13,23 @@ return new class extends Migration
     {
         Schema::create('user_favorites', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('user_id')->constrained()->onDelete('cascade');
-            $table->foreignId('video_id')->constrained()->onDelete('cascade');
-            $table->timestamps();
+            $table->unsignedBigInteger('user_id');
+            $table->unsignedBigInteger('video_id');
+            $table->timestamp('created_at')->useCurrent();
+            $table->timestamp('updated_at')->useCurrent()->useCurrentOnUpdate();
 
-            // Bir kullanıcı aynı videoyu birden fazla favorilere ekleyemez
+            // Composite unique index
             $table->unique(['user_id', 'video_id']);
-
-            // Performans için indexler
-            $table->index('user_id');
             $table->index('video_id');
+
+            // Foreign keys
+            $table->foreign('user_id', 'fk_user_favorites_user')
+                  ->references('id')->on('users')
+                  ->onDelete('cascade');
+
+            $table->foreign('video_id', 'fk_user_favorites_video')
+                  ->references('id')->on('videos')
+                  ->onDelete('cascade');
         });
     }
 

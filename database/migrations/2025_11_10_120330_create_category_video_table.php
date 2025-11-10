@@ -12,16 +12,13 @@ return new class extends Migration
     public function up(): void
     {
          Schema::create('category_video', function (Blueprint $table) {
-            $table->id();
             $table->foreignId('category_id')->constrained()->onDelete('cascade');
             $table->foreignId('video_id')->constrained()->onDelete('cascade');
-            $table->timestamps();
 
-            // Unique constraint - aynı video aynı kategoriye birden fazla eklenemez
-            $table->unique(['category_id', 'video_id']);
+            // Composite primary key - id kolonuna gerek yok
+            $table->primary(['category_id', 'video_id']);
 
-            // Indexes
-            $table->index('category_id');
+            // Ters yönlü sorgular için (video->categories)
             $table->index('video_id');
         });
     }

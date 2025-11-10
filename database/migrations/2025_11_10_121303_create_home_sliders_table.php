@@ -13,18 +13,23 @@ return new class extends Migration
     {
        Schema::create('home_sliders', function (Blueprint $table) {
             $table->id();
-            $table->string('title');
+            $table->string('title', 150);
             $table->text('description')->nullable();
-            $table->string('image_path'); // slider görseli
-            $table->foreignId('video_id')->nullable()->constrained()->onDelete('cascade'); // ilgili video
-            $table->integer('order')->default(0); // sıralama
+            $table->string('image_path', 255);
+            $table->unsignedBigInteger('video_id')->nullable();
+            $table->unsignedSmallInteger('order')->default(0);
             $table->boolean('is_active')->default(true);
-            $table->timestamps();
+            $table->timestamp('created_at')->useCurrent();
+            $table->timestamp('updated_at')->useCurrent()->useCurrentOnUpdate();
 
-            // Indexes
-            $table->index('is_active');
-            $table->index('order');
+            // Composite index for active sliders ordered
+            $table->index(['is_active', 'order']);
             $table->index('video_id');
+
+            // Foreign key
+            $table->foreign('video_id', 'fk_home_sliders_video')
+                  ->references('id')->on('videos')
+                  ->onDelete('cascade');
         });
     }
 

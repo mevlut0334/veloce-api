@@ -15,17 +15,21 @@ return new class extends Migration
             $table->id();
             $table->foreignId('user_id')->constrained()->onDelete('cascade');
             $table->foreignId('subscription_plan_id')->constrained()->onDelete('cascade');
-            $table->timestamp('started_at')->useCurrent();;
+            $table->timestamp('started_at')->useCurrent();
             $table->timestamp('expires_at')->nullable();
             $table->enum('status', ['active', 'expired', 'cancelled'])->default('active');
-            $table->string('payment_method')->nullable();
-            $table->string('transaction_id')->nullable();
+            $table->string('payment_method', 50)->nullable();
+            $table->string('transaction_id', 100)->nullable()->unique();
             $table->timestamps();
 
-            // Indexes
-            $table->index('user_id');
-            $table->index('status');
-            $table->index('expires_at');
+            // Composite indexes - en sık kullanılan sorgular için
+            $table->index(['user_id', 'status']);
+            $table->index(['user_id', 'expires_at']);
+            $table->index(['status', 'expires_at']);
+
+            // Unique constraint - bir kullanıcının aynı anda sadece 1 aktif aboneliği
+            $table->unique(['user_id', 'status'], 'unique_active_subscription')
+                  ->where('status', 'active');
         });
     }
 

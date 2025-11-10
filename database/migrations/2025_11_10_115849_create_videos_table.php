@@ -13,23 +13,29 @@ return new class extends Migration
     {
         Schema::create('videos', function (Blueprint $table) {
             $table->id();
-            $table->string('title');
+            $table->string('title', 255);
             $table->text('description')->nullable();
-            $table->string('video_path'); // storage'da dosya yolu
-            $table->string('thumbnail_path'); // storage'da görsel yolu
-            $table->enum('orientation', ['horizontal', 'vertical'])->default('horizontal');
+            $table->string('video_path', 500);
+            $table->string('thumbnail_path', 500);
+            $table->boolean('orientation')->default(0)->comment('0=horizontal, 1=vertical');
             $table->boolean('is_premium')->default(false);
-            $table->integer('duration')->nullable(); // saniye cinsinden
-            $table->bigInteger('view_count')->default(0);
+            $table->mediumInteger('duration')->unsigned()->nullable()->comment('seconds');
+            $table->unsignedInteger('view_count')->default(0);
             $table->boolean('is_active')->default(true);
             $table->timestamps();
 
-            // Indexes
-            $table->index('is_premium');
-            $table->index('is_active');
-            $table->index('orientation');
-            $table->index('view_count');
-            $table->index('created_at');
+            // Composite indexes - gerçek kullanım senaryoları için
+            // Ana sayfa: Aktif, horizontal videolar
+            $table->index(['is_active', 'orientation', 'created_at']);
+
+            // Premium filtreleme: Aktif premium videolar
+            $table->index(['is_active', 'is_premium', 'view_count']);
+
+            // Trending/Popular: Aktif videolar görüntülenmeye göre
+            $table->index(['is_active', 'view_count']);
+
+            // Fulltext search (opsiyonel - ihtiyaç varsa)
+            // $table->fullText(['title', 'description']);
         });
     }
 
