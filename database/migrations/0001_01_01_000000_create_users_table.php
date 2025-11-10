@@ -15,10 +15,30 @@ return new class extends Migration
             $table->id();
             $table->string('name');
             $table->string('email')->unique();
-            $table->timestamp('email_verified_at')->nullable();
+            $table->string('phone', 20);
             $table->string('password');
+            $table->string('avatar')->nullable();
+
+            // Subscription fields
+            $table->enum('subscription_type', ['free', 'premium'])->default('free');
+            $table->timestamp('subscription_starts_at')->nullable();
+            $table->timestamp('subscription_ends_at')->nullable();
+
+            // Status fields
+            $table->boolean('is_active')->default(true);
+            $table->timestamp('last_activity_at')->nullable();
+
             $table->rememberToken();
             $table->timestamps();
+
+            // Indexes for performance
+            $table->index('email');
+            $table->index('phone');
+            $table->index('subscription_type');
+            $table->index('is_active');
+            $table->index(['subscription_type', 'is_active']); // Composite index for filtering
+            $table->index('subscription_ends_at'); // For expired subscription checks
+            $table->index('created_at'); // For user registration stats
         });
 
         Schema::create('password_reset_tokens', function (Blueprint $table) {
