@@ -19,7 +19,10 @@ class User extends Authenticatable
     protected $fillable = [
         'name',
         'email',
+        'phone',
         'password',
+        'is_active',
+        'last_activity_at',
     ];
 
     /**
@@ -42,10 +45,17 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'is_active' => 'boolean',
+            'last_activity_at' => 'datetime',
         ];
     }
 
     // İlişkiler
+
+    public function userSubscriptions()
+    {
+        return $this->hasMany(UserSubscription::class);
+    }
 
     public function subscription()
     {
@@ -80,6 +90,28 @@ class User extends Authenticatable
         return $this->hasMany(VideoView::class);
     }
 
+    // Scope'lar
+
+    public function scopeSubscribers($query)
+    {
+        return $query->whereHas('activeSubscription');
+    }
+
+    public function scopeNonSubscribers($query)
+    {
+        return $query->whereDoesntHave('activeSubscription');
+    }
+
+    public function scopeActive($query)
+    {
+        return $query->where('is_active', true);
+    }
+
+    public function scopeInactive($query)
+    {
+        return $query->where('is_active', false);
+    }
+
     // Helper metodlar
 
     public function isSubscriber(): bool
@@ -89,10 +121,47 @@ class User extends Authenticatable
 
     public function hasAccessToVideo(Video $video): bool
     {
+        // Premium değilse herkes erişebilir
         if (!$video->is_premium) {
             return true;
         }
 
+        // Premium ise sadece abone olanlar erişebilir
         return $this->isSubscriber();
+    }
+
+    public function getSubscriptionStatusAttribute(): string
+    {
+        if ($this->isSubscriber()) {
+            return 'active';
+        }
+
+        if ($this->userSubscriptions()->exists()) {
+            return 'expired';
+        }
+
+        return 'none';
+    }
+
+    public function getSubscriptionExpiryAttribute(): ?string
+    {
+        $activeSub = $this->activeSubscription;
+
+        if ($activeSub) {
+            return $activeSub->expires_at->format('d.m.Y H:i');
+        }
+
+        return null;
+    }
+
+    public function getRemainingSubscriptionDaysAttribute(): int
+    {
+        $activeSub = $this->activeSubscription;
+
+        if ($activeSub) {
+            return now()->diffInDays($activeSub->expires_at);
+        }
+
+        return 0;
     }
 }

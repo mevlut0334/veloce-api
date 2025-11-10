@@ -24,7 +24,6 @@ class SubscriptionPlan extends Model
     ];
 
     // İlişkiler
-
     public function userSubscriptions()
     {
         return $this->hasMany(UserSubscription::class);
@@ -36,14 +35,19 @@ class SubscriptionPlan extends Model
     }
 
     // Helper metodlar
-
     public function getFormattedPriceAttribute(): string
     {
-        return number_format((float) $this->price, 2) . ' ' . 'TRY';
+        return number_format((float) $this->price, 2) . ' TRY';
     }
 
-    public function getDurationInMonthsAttribute(): float
+    public function getDurationInYearsAttribute(): int
     {
-        return round($this->duration_days / 30, 1);
+        return (int) ($this->duration_days / 365);
+    }
+
+    // Aktif planı getir (Sadece 1 tane olacak)
+    public static function getActivePlan()
+    {
+        return self::where('is_active', true)->first();
     }
 }
