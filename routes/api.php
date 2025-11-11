@@ -55,7 +55,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
 // PREMIUM ROUTES (Login + Abonelik zorunlu)
 // ============================================================================
 
-Route::middleware(['auth:sanctum', 'is_subscriber'])->group(function () {
+Route::middleware(['auth:sanctum', 'check.subscription'])->group(function () {
 
     // ------------------------------------------------------------------------
     // Premium içerikler için route'lar buraya eklenecek
