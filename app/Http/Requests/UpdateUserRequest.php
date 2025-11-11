@@ -35,12 +35,6 @@ class UpdateUserRequest extends FormRequest
                 'max:255',
                 Rule::unique('users')->ignore($userId)
             ],
-            'phone' => [
-                'sometimes',
-                'string',
-                'max:20',
-                Rule::unique('users')->ignore($userId)
-            ],
             'avatar' => ['sometimes', 'nullable', 'string', 'max:255'],
             'is_active' => ['sometimes', 'boolean'],
         ];
