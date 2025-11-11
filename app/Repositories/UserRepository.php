@@ -19,7 +19,6 @@ class UserRepository implements UserRepositoryInterface
         return User::create([
             'name' => $data['name'],
             'email' => $data['email'],
-            'phone' => $data['phone'],
             'password' => Hash::make($data['password']),
             'is_active' => $data['is_active'] ?? true,
         ]);
@@ -39,14 +38,6 @@ class UserRepository implements UserRepositoryInterface
     public function findByEmail(string $email): ?User
     {
         return User::where('email', $email)->first();
-    }
-
-    /**
-     * Telefon ile kullanıcı bul
-     */
-    public function findByPhone(string $phone): ?User
-    {
-        return User::where('phone', $phone)->first();
     }
 
     /**
@@ -93,7 +84,7 @@ class UserRepository implements UserRepositoryInterface
      */
     public function getAll(int $perPage = 15): LengthAwarePaginator
     {
-        return User::select(['id', 'name', 'email', 'phone', 'is_active', 'last_activity_at', 'created_at'])
+        return User::select(['id', 'name', 'email', 'is_active', 'last_activity_at', 'created_at'])
             ->latest()
             ->paginate($perPage);
     }
@@ -103,7 +94,7 @@ class UserRepository implements UserRepositoryInterface
      */
     public function getActiveUsers(int $perPage = 15): LengthAwarePaginator
     {
-        return User::select(['id', 'name', 'email', 'phone', 'is_active', 'last_activity_at', 'created_at'])
+        return User::select(['id', 'name', 'email', 'is_active', 'last_activity_at', 'created_at'])
             ->active()
             ->latest()
             ->paginate($perPage);
@@ -114,7 +105,7 @@ class UserRepository implements UserRepositoryInterface
      */
     public function getInactiveUsers(int $perPage = 15): LengthAwarePaginator
     {
-        return User::select(['id', 'name', 'email', 'phone', 'is_active', 'last_activity_at', 'created_at'])
+        return User::select(['id', 'name', 'email', 'is_active', 'last_activity_at', 'created_at'])
             ->inactive()
             ->latest()
             ->paginate($perPage);
@@ -125,7 +116,7 @@ class UserRepository implements UserRepositoryInterface
      */
     public function getSubscribers(int $perPage = 15): LengthAwarePaginator
     {
-        return User::select(['id', 'name', 'email', 'phone', 'is_active', 'last_activity_at', 'created_at'])
+        return User::select(['id', 'name', 'email', 'is_active', 'last_activity_at', 'created_at'])
             ->subscribers()
             ->latest()
             ->paginate($perPage);
@@ -136,7 +127,7 @@ class UserRepository implements UserRepositoryInterface
      */
     public function getNonSubscribers(int $perPage = 15): LengthAwarePaginator
     {
-        return User::select(['id', 'name', 'email', 'phone', 'is_active', 'last_activity_at', 'created_at'])
+        return User::select(['id', 'name', 'email', 'is_active', 'last_activity_at', 'created_at'])
             ->nonSubscribers()
             ->latest()
             ->paginate($perPage);
@@ -167,7 +158,7 @@ class UserRepository implements UserRepositoryInterface
      */
     public function getByRecentActivity(int $days = 30, int $perPage = 15): LengthAwarePaginator
     {
-        return User::select(['id', 'name', 'email', 'phone', 'is_active', 'last_activity_at', 'created_at'])
+        return User::select(['id', 'name', 'email', 'is_active', 'last_activity_at', 'created_at'])
             ->recentActivity($days)
             ->latest('last_activity_at')
             ->paginate($perPage);
