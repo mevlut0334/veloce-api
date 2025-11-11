@@ -3,160 +3,185 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\User;
+use App\Http\Requests\StoreUserRequest;
+use App\Http\Requests\UpdateUserRequest;
+use App\Http\Resources\UserResource;
+use App\Services\Interfaces\UserServiceInterface;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Hash;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
+    public function __construct(
+        protected UserServiceInterface $userService
+    ) {}
+
     /**
      * Kullanıcı kaydı
      */
-    public function register(Request $request)
+    public function register(StoreUserRequest $request): JsonResponse
     {
-        $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'email' => 'required|string|email|max:255|unique:users',
-            'phone' => 'required|string|max:20|unique:users',
-            'password' => 'required|string|min:6|confirmed',
-        ]);
+        try {
+            $result = $this->userService->register($request->validated());
 
-        $user = User::create([
-            'name' => $validated['name'],
-            'email' => $validated['email'],
-            'phone' => $validated['phone'],
-            'password' => Hash::make($validated['password']),
-        ]);
-
-        $token = $user->createToken('auth_token')->plainTextToken;
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Kayıt başarılı',
-            'data' => [
-                'user' => $user,
-                'token' => $token,
-            ]
-        ], 201);
+            return response()->json([
+                'success' => true,
+                'message' => 'Kayıt başarılı',
+                'data' => [
+                    'user' => new UserResource($result['user']),
+                    'token' => $result['token'],
+                ]
+            ], 201);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Kayıt sırasında bir hata oluştu',
+                'error' => $e->getMessage()
+            ], 500);
+        }
     }
 
     /**
      * Kullanıcı girişi
      */
-    public function login(Request $request)
+    public function login(Request $request): JsonResponse
     {
         $request->validate([
             'email' => 'required|email',
             'password' => 'required',
         ]);
 
-        $user = User::where('email', $request->email)->first();
+        try {
+            $result = $this->userService->login($request->only('email', 'password'));
 
-        if (!$user || !Hash::check($request->password, $user->password)) {
-            throw ValidationException::withMessages([
-                'email' => ['Giriş bilgileri hatalı'],
+            return response()->json([
+                'success' => true,
+                'message' => 'Giriş başarılı',
+                'data' => [
+                    'user' => new UserResource($result['user']),
+                    'token' => $result['token'],
+                ]
             ]);
-        }
-
-        if (!$user->is_active) {
+        } catch (ValidationException $e) {
             return response()->json([
                 'success' => false,
-                'message' => 'Hesabınız aktif değil',
-            ], 403);
+                'message' => 'Giriş bilgileri hatalı',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Giriş sırasında bir hata oluştu',
+                'error' => $e->getMessage()
+            ], 500);
         }
-
-        // Son aktivite zamanını güncelle
-        $user->update(['last_activity_at' => now()]);
-
-        $token = $user->createToken('auth_token')->plainTextToken;
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Giriş başarılı',
-            'data' => [
-                'user' => $user,
-                'token' => $token,
-            ]
-        ]);
     }
 
     /**
      * Kullanıcı çıkışı
      */
-    public function logout(Request $request)
+    public function logout(Request $request): JsonResponse
     {
-        $request->user()->currentAccessToken()->delete();
+        try {
+            $this->userService->logout($request->user());
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Çıkış başarılı',
-        ]);
+            return response()->json([
+                'success' => true,
+                'message' => 'Çıkış başarılı',
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Çıkış sırasında bir hata oluştu',
+            ], 500);
+        }
     }
 
     /**
      * Kullanıcı profilini getir
      */
-    public function profile(Request $request)
+    public function profile(Request $request): JsonResponse
     {
-        $user = $request->user()->load('activeSubscription');
+        try {
+            $profile = $this->userService->getProfile($request->user());
 
-        return response()->json([
-            'success' => true,
-            'data' => [
-                'user' => $user,
-                'is_subscriber' => $user->isSubscriber(),
-            ]
-        ]);
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'user' => new UserResource($profile['user']),
+                    'is_subscriber' => $profile['is_subscriber'],
+                    'subscription_status' => $profile['subscription_status'],
+                    'subscription_expiry' => $profile['subscription_expiry'],
+                    'remaining_days' => $profile['remaining_days'],
+                ]
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Profil bilgileri alınamadı',
+            ], 500);
+        }
     }
 
     /**
      * Profil güncelleme
      */
-    public function updateProfile(Request $request)
+    public function updateProfile(UpdateUserRequest $request): JsonResponse
     {
-        $user = $request->user();
+        try {
+            $user = $this->userService->updateProfile(
+                $request->user(),
+                $request->validated()
+            );
 
-        $validated = $request->validate([
-            'name' => 'sometimes|string|max:255',
-            'phone' => 'sometimes|string|max:20|unique:users,phone,' . $user->id,
-        ]);
-
-        $user->update($validated);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Profil güncellendi',
-            'data' => ['user' => $user]
-        ]);
+            return response()->json([
+                'success' => true,
+                'message' => 'Profil güncellendi',
+                'data' => [
+                    'user' => new UserResource($user)
+                ]
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Profil güncellenemedi',
+            ], 500);
+        }
     }
 
     /**
      * Şifre değiştirme
      */
-    public function changePassword(Request $request)
+    public function changePassword(Request $request): JsonResponse
     {
-        $validated = $request->validate([
+        $request->validate([
             'current_password' => 'required',
             'password' => 'required|string|min:6|confirmed',
         ]);
 
-        $user = $request->user();
+        try {
+            $this->userService->changePassword(
+                $request->user(),
+                $request->current_password,
+                $request->password
+            );
 
-        if (!Hash::check($validated['current_password'], $user->password)) {
-            throw ValidationException::withMessages([
-                'current_password' => ['Mevcut şifre hatalı'],
+            return response()->json([
+                'success' => true,
+                'message' => 'Şifre değiştirildi',
             ]);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Mevcut şifre hatalı',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Şifre değiştirilemedi',
+            ], 500);
         }
-
-        $user->update([
-            'password' => Hash::make($validated['password'])
-        ]);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Şifre değiştirildi',
-        ]);
     }
 }
