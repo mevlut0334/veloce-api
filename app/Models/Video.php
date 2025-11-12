@@ -8,23 +8,17 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use App\Jobs\ProcessVideoUpload;
+use App\Jobs\ProcessThumbnailUpload;
+use App\Jobs\OptimizeVideo;
+use App\Jobs\GenerateThumbnail;
 
 class Video extends Model
 {
     use HasFactory;
 
-    /**
-     * The table associated with the model.
-     *
-     * @var string
-     */
     protected $table = 'videos';
 
-    /**
-     * The attributes that are mass assignable.
-     *
-     * @var array<int, string>
-     */
     protected $fillable = [
         'title',
         'slug',
@@ -39,11 +33,6 @@ class Video extends Model
         'favorite_count',
     ];
 
-    /**
-     * The attributes that should be cast.
-     *
-     * @return array<string, string>
-     */
     protected function casts(): array
     {
         return [
@@ -57,42 +46,84 @@ class Video extends Model
         ];
     }
 
-    /**
-     * The accessors to append to the model's array form.
-     *
-     * @var array
-     */
     protected $appends = [];
 
-    /**
-     * Orientation sabitleri
-     */
     public const ORIENTATION_HORIZONTAL = 'horizontal';
     public const ORIENTATION_VERTICAL = 'vertical';
 
-    // İlişkiler
+    // =========================================================================
+    // JOB DISPATCH METODLARI - YENİ
+    // =========================================================================
 
     /**
-     * Video kategorileri
+     * Video upload job'unu başlat
      */
+    public function dispatchVideoUpload(string $tempVideoPath, string $targetFolder = 'videos/processed'): void
+    {
+        ProcessVideoUpload::dispatch($this, $tempVideoPath, $targetFolder);
+    }
+
+    /**
+     * Thumbnail upload job'unu başlat
+     */
+    public function dispatchThumbnailUpload(string $tempThumbnailPath, string $targetFolder = 'thumbnails/processed'): void
+    {
+        ProcessThumbnailUpload::dispatch($this, $tempThumbnailPath, $targetFolder);
+    }
+
+    /**
+     * Video optimizasyon job'unu başlat
+     */
+    public function dispatchOptimization(): void
+    {
+        OptimizeVideo::dispatch($this);
+    }
+
+    /**
+     * Otomatik thumbnail oluşturma job'unu başlat
+     */
+    public function dispatchThumbnailGeneration(int $timeInSeconds = 2): void
+    {
+        GenerateThumbnail::dispatch($this, $timeInSeconds);
+    }
+
+    /**
+     * Tüm işlemleri sırayla başlat (chain)
+     */
+    public function dispatchAllProcessing(string $tempVideoPath, ?string $tempThumbnailPath = null): void
+    {
+        // Video upload
+        ProcessVideoUpload::dispatch($this, $tempVideoPath)
+            ->chain([
+                // Video upload tamamlandıktan sonra optimize et
+                new OptimizeVideo($this),
+            ]);
+
+        // Eğer thumbnail manuel yüklendiyse
+        if ($tempThumbnailPath) {
+            ProcessThumbnailUpload::dispatch($this, $tempThumbnailPath);
+        } else {
+            // Yoksa otomatik oluştur (video upload'tan sonra)
+            GenerateThumbnail::dispatch($this)->delay(now()->addSeconds(30));
+        }
+    }
+
+    // =========================================================================
+    // İLİŞKİLER
+    // =========================================================================
+
     public function categories(): BelongsToMany
     {
         return $this->belongsToMany(Category::class, 'category_video')
             ->withTimestamps();
     }
 
-    /**
-     * Video etiketleri
-     */
     public function tags(): BelongsToMany
     {
         return $this->belongsToMany(Tag::class, 'tag_video')
             ->withTimestamps();
     }
 
-    /**
-     * Video playlistleri
-     */
     public function playlists(): BelongsToMany
     {
         return $this->belongsToMany(UserPlaylist::class, 'playlist_video')
@@ -100,44 +131,31 @@ class Video extends Model
             ->withTimestamps();
     }
 
-    /**
-     * Video görüntülenmeleri
-     */
     public function views(): HasMany
     {
         return $this->hasMany(VideoView::class);
     }
 
-    /**
-     * Favoriye ekleyen kullanıcılar
-     */
     public function favoritedBy(): BelongsToMany
     {
         return $this->belongsToMany(User::class, 'user_favorites')
             ->withTimestamps();
     }
 
-    // Accessor metodlar - Optimize edilmiş
+    // =========================================================================
+    // ACCESSOR METODLAR
+    // =========================================================================
 
-    /**
-     * Video URL'i
-     */
     public function videoUrl(): string
     {
         return Storage::url($this->video_path);
     }
 
-    /**
-     * Thumbnail URL'i
-     */
     public function thumbnailUrl(): string
     {
         return Storage::url($this->thumbnail_path);
     }
 
-    /**
-     * Formatlanmış süre (HH:MM:SS)
-     */
     public function formattedDuration(): string
     {
         $hours = floor($this->duration / 3600);
@@ -151,75 +169,50 @@ class Video extends Model
         return sprintf('%02d:%02d', $minutes, $seconds);
     }
 
-    // Scope'lar - Optimize edilmiş
+    // =========================================================================
+    // SCOPES
+    // =========================================================================
 
-    /**
-     * Aktif videolar
-     */
     public function scopeActive($query)
     {
         return $query->where('is_active', true);
     }
 
-    /**
-     * Premium videolar
-     */
     public function scopePremium($query)
     {
         return $query->where('is_premium', true);
     }
 
-    /**
-     * Ücretsiz videolar
-     */
     public function scopeFree($query)
     {
         return $query->where('is_premium', false);
     }
 
-    /**
-     * Yatay videolar
-     */
     public function scopeHorizontal($query)
     {
         return $query->where('orientation', self::ORIENTATION_HORIZONTAL);
     }
 
-    /**
-     * Dikey videolar
-     */
     public function scopeVertical($query)
     {
         return $query->where('orientation', self::ORIENTATION_VERTICAL);
     }
 
-    /**
-     * Popüler videolar (görüntülenme sayısına göre)
-     */
     public function scopePopular($query, int $limit = 10)
     {
         return $query->orderByDesc('view_count')->limit($limit);
     }
 
-    /**
-     * En çok favorilenler
-     */
     public function scopeMostFavorited($query, int $limit = 10)
     {
         return $query->orderByDesc('favorite_count')->limit($limit);
     }
 
-    /**
-     * Son eklenenler
-     */
     public function scopeRecent($query, int $limit = 10)
     {
         return $query->orderByDesc('created_at')->limit($limit);
     }
 
-    /**
-     * Belirli kategorideki videolar
-     */
     public function scopeInCategory($query, int $categoryId)
     {
         return $query->whereHas('categories', function($q) use ($categoryId) {
@@ -227,9 +220,6 @@ class Video extends Model
         });
     }
 
-    /**
-     * Belirli etikete sahip videolar
-     */
     public function scopeWithTag($query, int $tagId)
     {
         return $query->whereHas('tags', function($q) use ($tagId) {
@@ -237,9 +227,6 @@ class Video extends Model
         });
     }
 
-    /**
-     * Arama (başlık ve açıklama)
-     */
     public function scopeSearch($query, string $term)
     {
         return $query->where(function($q) use ($term) {
@@ -248,17 +235,11 @@ class Video extends Model
         });
     }
 
-    /**
-     * Slug'a göre bul
-     */
     public function scopeBySlug($query, string $slug)
     {
         return $query->where('slug', $slug);
     }
 
-    /**
-     * İlişkilerle birlikte yükle (N+1 önleme)
-     */
     public function scopeWithRelations($query)
     {
         return $query->with([
@@ -267,35 +248,25 @@ class Video extends Model
         ]);
     }
 
-    /**
-     * Sayılarla birlikte yükle
-     */
     public function scopeWithCounts($query)
     {
         return $query->withCount(['views', 'favoritedBy']);
     }
 
-    // Helper metodlar - Optimize edilmiş
+    // =========================================================================
+    // HELPER METODLAR
+    // =========================================================================
 
-    /**
-     * Görüntülenme sayısını artır (Tek sorgu, timestamp güncelleme yok)
-     */
     public function incrementViewCount(): bool
     {
         return $this->increment('view_count', 1, ['updated_at' => $this->updated_at]);
     }
 
-    /**
-     * Favori sayısını artır
-     */
     public function incrementFavoriteCount(): bool
     {
         return $this->increment('favorite_count', 1, ['updated_at' => $this->updated_at]);
     }
 
-    /**
-     * Favori sayısını azalt
-     */
     public function decrementFavoriteCount(): bool
     {
         if ($this->favorite_count > 0) {
@@ -304,16 +275,12 @@ class Video extends Model
         return false;
     }
 
-    /**
-     * Kullanıcı bu videoyu favorilemiş mi? (Optimize)
-     */
     public function isFavoritedBy(?int $userId = null): bool
     {
         if (!$userId) {
             return false;
         }
 
-        // İlişki yüklenmişse collection'dan kontrol et
         if ($this->relationLoaded('favoritedBy')) {
             return $this->favoritedBy->contains('id', $userId);
         }
@@ -321,28 +288,19 @@ class Video extends Model
         return $this->favoritedBy()->where('user_id', $userId)->exists();
     }
 
-    /**
-     * Kullanıcının bu videoya erişimi var mı?
-     */
     public function canBeAccessedBy(?User $user = null): bool
     {
-        // Aktif değilse erişim yok
         if (!$this->is_active) {
             return false;
         }
 
-        // Ücretsizse herkes erişebilir
         if (!$this->is_premium) {
             return true;
         }
 
-        // Premium ise kullanıcı aboneliği kontrol et
         return $user && $user->isSubscriber();
     }
 
-    /**
-     * Video slug'ı oluştur
-     */
     public function generateSlug(): string
     {
         $slug = Str::slug($this->title);
@@ -351,41 +309,26 @@ class Video extends Model
         return $count > 0 ? "{$slug}-{$count}" : $slug;
     }
 
-    /**
-     * Kategori ekle
-     */
     public function addCategory(int $categoryId): void
     {
         $this->categories()->syncWithoutDetaching([$categoryId]);
     }
 
-    /**
-     * Etiket ekle
-     */
     public function addTag(int $tagId): void
     {
         $this->tags()->syncWithoutDetaching([$tagId]);
     }
 
-    /**
-     * Toplu kategori güncelle
-     */
     public function syncCategories(array $categoryIds): void
     {
         $this->categories()->sync($categoryIds);
     }
 
-    /**
-     * Toplu etiket güncelle
-     */
     public function syncTags(array $tagIds): void
     {
         $this->tags()->sync($tagIds);
     }
 
-    /**
-     * Video dosyalarını sil
-     */
     public function deleteFiles(): bool
     {
         $success = true;
@@ -401,19 +344,15 @@ class Video extends Model
         return $success;
     }
 
-    // Static Helper Metodlar
+    // =========================================================================
+    // STATIC METODLAR
+    // =========================================================================
 
-    /**
-     * Slug'a göre bul veya hata fırlat
-     */
     public static function findBySlugOrFail(string $slug): self
     {
         return static::bySlug($slug)->firstOrFail();
     }
 
-    /**
-     * Popüler videoları getir (cache'lenebilir)
-     */
     public static function getPopularVideos(int $limit = 10): \Illuminate\Database\Eloquent\Collection
     {
         return static::active()
@@ -422,9 +361,6 @@ class Video extends Model
             ->get();
     }
 
-    /**
-     * İstatistikler
-     */
     public static function getStatistics(): array
     {
         return [
@@ -439,9 +375,6 @@ class Video extends Model
         ];
     }
 
-    /**
-     * Toplu görüntülenme güncelleme (Cron job için)
-     */
     public static function updateViewCounts(array $videoIdViewCounts): void
     {
         foreach ($videoIdViewCounts as $videoId => $count) {
@@ -450,9 +383,6 @@ class Video extends Model
         }
     }
 
-    /**
-     * Benzer videoları bul
-     */
     public function getSimilarVideos(int $limit = 6): \Illuminate\Database\Eloquent\Collection
     {
         $categoryIds = $this->categories->pluck('id');
@@ -471,17 +401,17 @@ class Video extends Model
             ->get();
     }
 
-    // Event Hooks
+    // =========================================================================
+    // EVENT HOOKS
+    // =========================================================================
 
     protected static function booted()
     {
-        // Oluşturulurken slug oluştur
         static::creating(function ($video) {
             if (!$video->slug) {
                 $video->slug = $video->generateSlug();
             }
 
-            // Varsayılan değerler
             if (is_null($video->view_count)) {
                 $video->view_count = 0;
             }
@@ -489,20 +419,21 @@ class Video extends Model
             if (is_null($video->favorite_count)) {
                 $video->favorite_count = 0;
             }
+
+            // Job kullanırken varsayılan olarak inactive başlat
+            if (is_null($video->is_active)) {
+                $video->is_active = false;
+            }
         });
 
-        // Güncellenirken başlık değiştiyse slug'ı güncelle
         static::updating(function ($video) {
             if ($video->isDirty('title') && !$video->isDirty('slug')) {
                 $video->slug = $video->generateSlug();
             }
         });
 
-        // Silinirken dosyaları da sil
         static::deleting(function ($video) {
             $video->deleteFiles();
-
-            // Pivot kayıtları temizle
             $video->categories()->detach();
             $video->tags()->detach();
             $video->playlists()->detach();
