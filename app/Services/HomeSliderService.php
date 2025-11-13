@@ -44,19 +44,21 @@ class HomeSliderService implements HomeSliderServiceInterface
         DB::beginTransaction();
 
         try {
-            // 1. Slider kaydını oluştur (inactive)
+            // Slider kaydını oluştur
             $sliderData = [
                 'title' => $data['title'],
-                'description' => $data['description'] ?? null,
+                'subtitle' => $data['subtitle'] ?? null,
+                'button_text' => $data['button_text'] ?? null,
+                'button_link' => $data['button_link'] ?? null,
                 'video_id' => $data['video_id'] ?? null,
                 'order' => $data['order'] ?? 0,
-                'is_active' => false,
+                'is_active' => $data['is_active'] ?? false,
                 'image_path' => '',
             ];
 
             $slider = $this->sliderRepository->create($sliderData);
 
-            // 2. Resmi geçici klasöre yükle ve job başlat
+            // Resmi geçici klasöre yükle ve job başlat
             $tempImagePath = $imageFile->store('sliders/temp');
             $slider->dispatchImageUpload($tempImagePath);
 
@@ -86,25 +88,30 @@ class HomeSliderService implements HomeSliderServiceInterface
         DB::beginTransaction();
 
         try {
-            // 1. Slider bilgilerini güncelle
+            // Slider bilgilerini güncelle
             $updateData = [
                 'title' => $data['title'],
-                'description' => $data['description'] ?? null,
+                'subtitle' => $data['subtitle'] ?? null,
+                'button_text' => $data['button_text'] ?? null,
+                'button_link' => $data['button_link'] ?? null,
                 'video_id' => $data['video_id'] ?? null,
-                'order' => $data['order'] ?? 0,
+                'order' => $data['order'] ?? $slider->order,
                 'is_active' => $data['is_active'] ?? $slider->is_active,
             ];
 
             $this->sliderRepository->update($slider, $updateData);
 
-            // 2. Yeni resim yüklendiyse
+            // Yeni resim yüklendiyse
             if ($imageFile) {
                 // Eski resmi sil
                 $this->sliderRepository->deleteImage($slider);
 
                 // Geçici klasöre yükle ve job başlat
                 $tempImagePath = $imageFile->store('sliders/temp');
+
+                // Resim işlenirken slider'ı inaktif yap
                 $this->sliderRepository->update($slider, ['is_active' => false]);
+
                 $slider->dispatchImageUpload($tempImagePath);
             }
 
@@ -112,7 +119,8 @@ class HomeSliderService implements HomeSliderServiceInterface
 
             Log::info('Slider başarıyla güncellendi', [
                 'slider_id' => $slider->id,
-                'title' => $slider->title
+                'title' => $slider->title,
+                'image_updated' => $imageFile !== null
             ]);
 
             return true;
@@ -122,7 +130,8 @@ class HomeSliderService implements HomeSliderServiceInterface
 
             Log::error('Slider güncelleme hatası', [
                 'slider_id' => $slider->id,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
             ]);
 
             throw $e;
@@ -131,12 +140,16 @@ class HomeSliderService implements HomeSliderServiceInterface
 
     public function deleteSlider(HomeSlider $slider): bool
     {
+        DB::beginTransaction();
+
         try {
             // Resmi sil
             $this->sliderRepository->deleteImage($slider);
 
             // Slider kaydını sil
             $result = $this->sliderRepository->delete($slider);
+
+            DB::commit();
 
             Log::info('Slider başarıyla silindi', [
                 'slider_id' => $slider->id,
@@ -146,9 +159,12 @@ class HomeSliderService implements HomeSliderServiceInterface
             return $result;
 
         } catch (\Exception $e) {
+            DB::rollBack();
+
             Log::error('Slider silme hatası', [
                 'slider_id' => $slider->id,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
             ]);
 
             throw $e;
@@ -157,7 +173,24 @@ class HomeSliderService implements HomeSliderServiceInterface
 
     public function toggleSliderStatus(HomeSlider $slider): bool
     {
-        return $this->sliderRepository->toggleActive($slider);
+        try {
+            $result = $this->sliderRepository->toggleActive($slider);
+
+            Log::info('Slider durumu değiştirildi', [
+                'slider_id' => $slider->id,
+                'new_status' => $slider->fresh()->is_active ? 'aktif' : 'pasif'
+            ]);
+
+            return $result;
+
+        } catch (\Exception $e) {
+            Log::error('Slider durum değiştirme hatası', [
+                'slider_id' => $slider->id,
+                'error' => $e->getMessage()
+            ]);
+
+            throw $e;
+        }
     }
 
     public function updateSliderOrder(array $sliders): bool
@@ -175,7 +208,8 @@ class HomeSliderService implements HomeSliderServiceInterface
 
         } catch (\Exception $e) {
             Log::error('Slider sıralama hatası', [
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
             ]);
 
             throw $e;

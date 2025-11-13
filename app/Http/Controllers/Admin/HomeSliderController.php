@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\StoreHomeSliderRequest;
+use App\Http\Requests\UpdateHomeSliderRequest;
 use App\Models\HomeSlider;
 use App\Models\Video;
 use App\Services\Contracts\HomeSliderServiceInterface;
@@ -44,46 +46,29 @@ class HomeSliderController extends Controller
     /**
      * Store a newly created resource in storage.
      */
-    public function store(Request $request)
+    public function store(StoreHomeSliderRequest $request)
     {
-        $validated = $request->validate([
-            'title' => 'required|string|max:150',
-            'description' => 'nullable|string',
-            'image' => 'required|image|mimes:jpeg,png,jpg,webp|max:10240',
-            'video_id' => 'nullable|exists:videos,id',
-            'order' => 'nullable|integer|min:0',
-        ]);
-
         try {
             $slider = $this->sliderService->createSlider(
-                $validated,
+                $request->validated(),
                 $request->file('image')
             );
 
             return redirect()
                 ->route('admin.sliders.index')
-                ->with('success', 'Slider yükleniyor! İşlem tamamlandığında aktif hale gelecek.');
+                ->with('success', 'Slider başarıyla oluşturuldu!');
 
         } catch (\Exception $e) {
-            Log::error('Slider oluşturma hatası (Controller)', [
-                'error' => $e->getMessage()
+            Log::error('Slider oluşturma hatası', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
             ]);
 
             return redirect()
                 ->back()
                 ->withInput()
-                ->with('error', 'Slider yüklenirken bir hata oluştu: ' . $e->getMessage());
+                ->with('error', 'Slider oluşturulurken bir hata oluştu: ' . $e->getMessage());
         }
-    }
-
-    /**
-     * Display the specified resource.
-     */
-    public function show(HomeSlider $slider)
-    {
-        $slider->load('video');
-
-        return view('admin.sliders.show', compact('slider'));
     }
 
     /**
@@ -104,32 +89,24 @@ class HomeSliderController extends Controller
     /**
      * Update the specified resource in storage.
      */
-    public function update(Request $request, HomeSlider $slider)
+    public function update(UpdateHomeSliderRequest $request, HomeSlider $slider)
     {
-        $validated = $request->validate([
-            'title' => 'required|string|max:150',
-            'description' => 'nullable|string',
-            'image' => 'nullable|image|mimes:jpeg,png,jpg,webp|max:10240',
-            'video_id' => 'nullable|exists:videos,id',
-            'order' => 'nullable|integer|min:0',
-            'is_active' => 'boolean',
-        ]);
-
         try {
             $this->sliderService->updateSlider(
                 $slider,
-                $validated,
+                $request->validated(),
                 $request->file('image')
             );
 
             return redirect()
                 ->route('admin.sliders.index')
-                ->with('success', 'Slider güncellendi!');
+                ->with('success', 'Slider başarıyla güncellendi!');
 
         } catch (\Exception $e) {
-            Log::error('Slider güncelleme hatası (Controller)', [
+            Log::error('Slider güncelleme hatası', [
                 'slider_id' => $slider->id,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
             ]);
 
             return redirect()
@@ -149,12 +126,13 @@ class HomeSliderController extends Controller
 
             return redirect()
                 ->route('admin.sliders.index')
-                ->with('success', 'Slider silindi!');
+                ->with('success', 'Slider başarıyla silindi!');
 
         } catch (\Exception $e) {
-            Log::error('Slider silme hatası (Controller)', [
+            Log::error('Slider silme hatası', [
                 'slider_id' => $slider->id,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
             ]);
 
             return redirect()
@@ -171,23 +149,28 @@ class HomeSliderController extends Controller
         try {
             $this->sliderService->toggleSliderStatus($slider);
 
-            $status = $slider->fresh()->is_active ? 'aktif' : 'inaktif';
+            $status = $slider->fresh()->is_active ? 'aktif' : 'pasif';
 
             return redirect()
                 ->back()
-                ->with('success', "Slider {$status} yapıldı!");
+                ->with('success', "Slider {$status} hale getirildi!");
 
         } catch (\Exception $e) {
+            Log::error('Slider durum değiştirme hatası', [
+                'slider_id' => $slider->id,
+                'error' => $e->getMessage()
+            ]);
+
             return redirect()
                 ->back()
-                ->with('error', 'İşlem başarısız: ' . $e->getMessage());
+                ->with('error', 'Durum değiştirilemedi: ' . $e->getMessage());
         }
     }
 
     /**
-     * Update slider order
+     * Update slider order (Reorder)
      */
-    public function updateOrder(Request $request)
+    public function reorder(Request $request)
     {
         $validated = $request->validate([
             'sliders' => 'required|array',
@@ -200,12 +183,13 @@ class HomeSliderController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Sıralama güncellendi!'
+                'message' => 'Slider sıralaması başarıyla güncellendi!'
             ]);
 
         } catch (\Exception $e) {
-            Log::error('Slider sıralama hatası (Controller)', [
-                'error' => $e->getMessage()
+            Log::error('Slider sıralama hatası', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
             ]);
 
             return response()->json([

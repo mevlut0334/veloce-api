@@ -16,7 +16,9 @@ class HomeSlider extends Model
 
     protected $fillable = [
         'title',
-        'description',
+        'subtitle',
+        'button_text',
+        'button_link',
         'image_path',
         'video_id',
         'order',
@@ -29,7 +31,9 @@ class HomeSlider extends Model
         'video_id' => 'integer',
     ];
 
-    protected $appends = [];
+    protected $appends = [
+        'image_url'
+    ];
 
     protected static function booted()
     {
@@ -43,7 +47,7 @@ class HomeSlider extends Model
     }
 
     // =========================================================================
-    // JOB DISPATCH METODLARI - YENİ
+    // JOB DISPATCH METODLARI
     // =========================================================================
 
     /**
@@ -123,8 +127,8 @@ class HomeSlider extends Model
     {
         return $query
             ->select([
-                'id', 'title', 'description', 'image_path',
-                'video_id', 'order'
+                'id', 'title', 'subtitle', 'button_text', 'button_link',
+                'image_path', 'video_id', 'order'
             ])
             ->active()
             ->ordered()
@@ -194,5 +198,22 @@ class HomeSlider extends Model
             return Storage::delete($this->image_path);
         }
         return false;
+    }
+
+    public function hasButton(): bool
+    {
+        return !empty($this->button_text) && !empty($this->button_link);
+    }
+
+    public function getButtonData(): ?array
+    {
+        if (!$this->hasButton()) {
+            return null;
+        }
+
+        return [
+            'text' => $this->button_text,
+            'link' => $this->button_link,
+        ];
     }
 }

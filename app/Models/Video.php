@@ -27,8 +27,11 @@ class Video extends Model
         'thumbnail_path',
         'duration',
         'orientation',
+        'resolution',
+        'file_size',
         'is_premium',
         'is_active',
+        'is_processed',
         'view_count',
         'favorite_count',
     ];
@@ -38,72 +41,130 @@ class Video extends Model
         return [
             'is_premium' => 'boolean',
             'is_active' => 'boolean',
+            'is_processed' => 'boolean',
             'view_count' => 'integer',
             'favorite_count' => 'integer',
             'duration' => 'integer',
+            'file_size' => 'integer',
             'created_at' => 'datetime',
             'updated_at' => 'datetime',
         ];
     }
 
+    // Resource'larda otomatik kullanılacak accessor'lar
     protected $appends = [];
 
     public const ORIENTATION_HORIZONTAL = 'horizontal';
     public const ORIENTATION_VERTICAL = 'vertical';
 
+    // Video limitleri (bilgi amaçlı - validasyonda kullanılacak)
+    public const MAX_DURATION_SECONDS = 600; // 10 dakika
+    public const MAX_FILE_SIZE_MB = 2048; // 2GB
+    public const MAX_FILE_SIZE_BYTES = self::MAX_FILE_SIZE_MB * 1024 * 1024;
+
     // =========================================================================
-    // JOB DISPATCH METODLARI - YENİ
+    // ACCESSOR METODLARI - Resource'larda kullanılacak
     // =========================================================================
 
     /**
-     * Video upload job'unu başlat
+     * Tam video URL'i döndürür
      */
+    public function getVideoUrlAttribute(): ?string
+    {
+        if (!$this->video_path) {
+            return null;
+        }
+
+        return Storage::url($this->video_path);
+    }
+
+    /**
+     * Tam thumbnail URL'i döndürür
+     */
+    public function getThumbnailUrlAttribute(): ?string
+    {
+        if (!$this->thumbnail_path) {
+            return null;
+        }
+
+        return Storage::url($this->thumbnail_path);
+    }
+
+    /**
+     * İnsan okunabilir süre formatı: "5:30" veya "1:23:45"
+     */
+    public function getDurationHumanAttribute(): string
+    {
+        if (!$this->duration) {
+            return '0:00';
+        }
+
+        $hours = floor($this->duration / 3600);
+        $minutes = floor(($this->duration % 3600) / 60);
+        $seconds = $this->duration % 60;
+
+        if ($hours > 0) {
+            return sprintf('%d:%02d:%02d', $hours, $minutes, $seconds);
+        }
+
+        return sprintf('%d:%02d', $minutes, $seconds);
+    }
+
+    /**
+     * İnsan okunabilir dosya boyutu: "15.5 MB"
+     */
+    public function getFileSizeHumanAttribute(): ?string
+    {
+        if (!$this->file_size) {
+            return null;
+        }
+
+        $units = ['B', 'KB', 'MB', 'GB'];
+        $size = $this->file_size;
+        $unit = 0;
+
+        while ($size >= 1024 && $unit < count($units) - 1) {
+            $size /= 1024;
+            $unit++;
+        }
+
+        return round($size, 2) . ' ' . $units[$unit];
+    }
+
+    // =========================================================================
+    // JOB DISPATCH METODLARI
+    // =========================================================================
+
     public function dispatchVideoUpload(string $tempVideoPath, string $targetFolder = 'videos/processed'): void
     {
         ProcessVideoUpload::dispatch($this, $tempVideoPath, $targetFolder);
     }
 
-    /**
-     * Thumbnail upload job'unu başlat
-     */
     public function dispatchThumbnailUpload(string $tempThumbnailPath, string $targetFolder = 'thumbnails/processed'): void
     {
         ProcessThumbnailUpload::dispatch($this, $tempThumbnailPath, $targetFolder);
     }
 
-    /**
-     * Video optimizasyon job'unu başlat
-     */
     public function dispatchOptimization(): void
     {
         OptimizeVideo::dispatch($this);
     }
 
-    /**
-     * Otomatik thumbnail oluşturma job'unu başlat
-     */
     public function dispatchThumbnailGeneration(int $timeInSeconds = 2): void
     {
         GenerateThumbnail::dispatch($this, $timeInSeconds);
     }
 
-    /**
-     * Tüm işlemleri sırayla başlat (chain)
-     */
     public function dispatchAllProcessing(string $tempVideoPath, ?string $tempThumbnailPath = null): void
     {
-        // Video upload
         ProcessVideoUpload::dispatch($this, $tempVideoPath)
             ->chain([
-                // Video upload tamamlandıktan sonra optimize et
                 new OptimizeVideo($this),
             ]);
 
-        // Eğer thumbnail manuel yüklendiyse
         if ($tempThumbnailPath) {
             ProcessThumbnailUpload::dispatch($this, $tempThumbnailPath);
         } else {
-            // Yoksa otomatik oluştur (video upload'tan sonra)
             GenerateThumbnail::dispatch($this)->delay(now()->addSeconds(30));
         }
     }
@@ -143,30 +204,22 @@ class Video extends Model
     }
 
     // =========================================================================
-    // ACCESSOR METODLAR
+    // ESKİ METODLAR (Geriye dönük uyumluluk için)
     // =========================================================================
 
     public function videoUrl(): string
     {
-        return Storage::url($this->video_path);
+        return $this->video_url ?? '';
     }
 
     public function thumbnailUrl(): string
     {
-        return Storage::url($this->thumbnail_path);
+        return $this->thumbnail_url ?? '';
     }
 
     public function formattedDuration(): string
     {
-        $hours = floor($this->duration / 3600);
-        $minutes = floor(($this->duration % 3600) / 60);
-        $seconds = $this->duration % 60;
-
-        if ($hours > 0) {
-            return sprintf('%02d:%02d:%02d', $hours, $minutes, $seconds);
-        }
-
-        return sprintf('%02d:%02d', $minutes, $seconds);
+        return $this->duration_human;
     }
 
     // =========================================================================
@@ -251,6 +304,11 @@ class Video extends Model
     public function scopeWithCounts($query)
     {
         return $query->withCount(['views', 'favoritedBy']);
+    }
+
+    public function scopeProcessed($query)
+    {
+        return $query->where('is_processed', true);
     }
 
     // =========================================================================
@@ -420,9 +478,12 @@ class Video extends Model
                 $video->favorite_count = 0;
             }
 
-            // Job kullanırken varsayılan olarak inactive başlat
             if (is_null($video->is_active)) {
                 $video->is_active = false;
+            }
+
+            if (is_null($video->is_processed)) {
+                $video->is_processed = false;
             }
         });
 

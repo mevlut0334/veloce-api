@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\StoreVideoRequest;
+use App\Http\Requests\UpdateVideoRequest;
 use App\Models\Video;
 use App\Models\Category;
 use App\Models\Tag;
@@ -52,23 +54,11 @@ class VideoController extends Controller
     /**
      * Store a newly created resource in storage.
      */
-    public function store(Request $request)
+    public function store(StoreVideoRequest $request)
     {
-        $validated = $request->validate([
-            'title' => 'required|string|max:255',
-            'description' => 'nullable|string',
-            'video' => 'required|file|mimetypes:video/mp4,video/mpeg,video/quicktime|max:512000',
-            'thumbnail' => 'nullable|image|mimes:jpeg,png,jpg,webp|max:5120',
-            'is_premium' => 'boolean',
-            'category_ids' => 'nullable|array',
-            'category_ids.*' => 'exists:categories,id',
-            'tag_ids' => 'nullable|array',
-            'tag_ids.*' => 'exists:tags,id',
-        ]);
-
         try {
             $video = $this->videoService->createVideo(
-                $validated,
+                $request->validated(),
                 $request->file('video'),
                 $request->file('thumbnail')
             );
@@ -114,26 +104,12 @@ class VideoController extends Controller
     /**
      * Update the specified resource in storage.
      */
-    public function update(Request $request, Video $video)
+    public function update(UpdateVideoRequest $request, Video $video)
     {
-        $validated = $request->validate([
-            'title' => 'required|string|max:255',
-            'description' => 'nullable|string',
-            'video' => 'nullable|file|mimetypes:video/mp4,video/mpeg,video/quicktime|max:512000',
-            'thumbnail' => 'nullable|image|mimes:jpeg,png,jpg,webp|max:5120',
-            'is_premium' => 'boolean',
-            'is_active' => 'boolean',
-            'orientation' => 'nullable|in:horizontal,vertical',
-            'category_ids' => 'nullable|array',
-            'category_ids.*' => 'exists:categories,id',
-            'tag_ids' => 'nullable|array',
-            'tag_ids.*' => 'exists:tags,id',
-        ]);
-
         try {
             $this->videoService->updateVideo(
                 $video,
-                $validated,
+                $request->validated(),
                 $request->file('video'),
                 $request->file('thumbnail')
             );
@@ -201,6 +177,29 @@ class VideoController extends Controller
     }
 
     /**
+     * Toggle video premium status
+     */
+    public function togglePremium(Video $video)
+    {
+        try {
+            $video->update([
+                'is_premium' => !$video->is_premium
+            ]);
+
+            $status = $video->is_premium ? 'premium' : 'genel';
+
+            return redirect()
+                ->back()
+                ->with('success', "Video {$status} içerik yapıldı!");
+
+        } catch (\Exception $e) {
+            return redirect()
+                ->back()
+                ->with('error', 'İşlem başarısız: ' . $e->getMessage());
+        }
+    }
+
+    /**
      * Regenerate thumbnail
      */
     public function regenerateThumbnail(Video $video)
@@ -246,6 +245,51 @@ class VideoController extends Controller
             return redirect()
                 ->back()
                 ->with('error', 'Toplu güncelleme başarısız: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Bulk update premium status
+     */
+    public function bulkUpdatePremium(Request $request)
+    {
+        $validated = $request->validate([
+            'video_ids' => 'required|array',
+            'video_ids.*' => 'exists:videos,id',
+            'is_premium' => 'required|boolean',
+        ]);
+
+        try {
+            $count = Video::whereIn('id', $validated['video_ids'])
+                ->update(['is_premium' => $validated['is_premium']]);
+
+            $status = $validated['is_premium'] ? 'premium' : 'genel';
+
+            return redirect()
+                ->back()
+                ->with('success', "{$count} video {$status} yapıldı!");
+
+        } catch (\Exception $e) {
+            return redirect()
+                ->back()
+                ->with('error', 'Toplu güncelleme başarısız: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Get video statistics
+     */
+    public function statistics()
+    {
+        try {
+            $stats = $this->videoService->getStatistics();
+
+            return view('admin.videos.statistics', compact('stats'));
+
+        } catch (\Exception $e) {
+            return redirect()
+                ->back()
+                ->with('error', 'İstatistikler yüklenemedi: ' . $e->getMessage());
         }
     }
 }

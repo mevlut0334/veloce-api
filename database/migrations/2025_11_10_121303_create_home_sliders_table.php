@@ -11,16 +11,17 @@ return new class extends Migration
      */
     public function up(): void
     {
-       Schema::create('home_sliders', function (Blueprint $table) {
+        Schema::create('home_sliders', function (Blueprint $table) {
             $table->id();
-            $table->string('title', 150);
-            $table->text('description')->nullable();
-            $table->string('image_path', 255);
+            $table->string('title', 255);
+            $table->string('subtitle', 500)->nullable();
+            $table->string('button_text', 100)->nullable();
+            $table->string('button_link', 500)->nullable();
+            $table->string('image_path', 255)->nullable();
             $table->unsignedBigInteger('video_id')->nullable();
             $table->unsignedSmallInteger('order')->default(0);
             $table->boolean('is_active')->default(true);
-            $table->timestamp('created_at')->useCurrent();
-            $table->timestamp('updated_at')->useCurrent()->useCurrentOnUpdate();
+            $table->timestamps();
 
             // Composite index for active sliders ordered
             $table->index(['is_active', 'order']);

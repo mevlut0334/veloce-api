@@ -1,9 +1,5 @@
 <?php
 
-// =============================================================================
-// MODEL: App\Models\Category.php
-// =============================================================================
-
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -22,23 +18,25 @@ class Category extends Model
         'icon',
         'order',
         'is_active',
+        'show_on_home', // ← YENİ EKLENEN
     ];
 
     protected $casts = [
         'is_active' => 'boolean',
+        'show_on_home' => 'boolean', // ← YENİ EKLENEN
         'order' => 'integer',
     ];
 
-    // Varsayılan sıralama
     protected static function booted()
     {
-        // Cache temizleme
         static::saved(function ($category) {
             $category->clearCache();
+            static::clearHomeCache(); // ← YENİ EKLENEN
         });
 
         static::deleted(function ($category) {
             $category->clearCache();
+            static::clearHomeCache(); // ← YENİ EKLENEN
         });
     }
 
@@ -46,18 +44,12 @@ class Category extends Model
     // İLİŞKİLER
     // =========================================================================
 
-    /**
-     * Kategoriye ait tüm videolar
-     */
     public function videos()
     {
         return $this->belongsToMany(Video::class, 'category_video')
             ->withTimestamps();
     }
 
-    /**
-     * Kategoriye ait sadece aktif videolar (Optimize edilmiş ilişki)
-     */
     public function activeVideos()
     {
         return $this->belongsToMany(Video::class, 'category_video')
@@ -69,18 +61,12 @@ class Category extends Model
     // HELPER METODLAR
     // =========================================================================
 
-    /**
-     * Aktif video sayısını döndürür
-     * NOT: Liste görünümlerinde mutlaka withActiveVideosCount() scope'u ile kullanın
-     */
     public function getActiveVideosCount(): int
     {
-        // Eğer withCount ile yüklenmişse, direkt kullan (N+1 önleme)
         if (isset($this->active_videos_count)) {
             return $this->active_videos_count;
         }
 
-        // Cache ile performans artışı (5 dakika)
         return Cache::remember(
             $this->getCacheKey('active_videos_count'),
             now()->addMinutes(5),
@@ -88,9 +74,6 @@ class Category extends Model
         );
     }
 
-    /**
-     * Toplam video sayısını döndürür
-     */
     public function getVideosCount(): int
     {
         if (isset($this->videos_count)) {
@@ -104,56 +87,48 @@ class Category extends Model
         );
     }
 
-    /**
-     * Cache key oluştur
-     */
     private function getCacheKey(string $suffix): string
     {
         return "category_{$this->id}_{$suffix}";
     }
 
-    /**
-     * Kategoriye ait cache'leri temizle
-     */
     public function clearCache(): void
     {
         Cache::forget($this->getCacheKey('active_videos_count'));
         Cache::forget($this->getCacheKey('videos_count'));
     }
 
+    // ← YENİ EKLENEN METOD
+    public static function clearHomeCache(): void
+    {
+        Cache::forget('home_categories');
+    }
+
     // =========================================================================
-    // SCOPES (N+1 Önleme & Performans İyileştirme)
+    // SCOPES
     // =========================================================================
 
-    /**
-     * Sadece aktif kategoriler
-     */
     public function scopeActive(Builder $query): Builder
     {
         return $query->where('is_active', true);
     }
 
-    /**
-     * Sıralı getir
-     */
     public function scopeOrdered(Builder $query): Builder
     {
         return $query->orderBy('order')->orderBy('name');
     }
 
-    /**
-     * Toplam video sayısı ile getir (N+1 önleme)
-     * Kullanım: Category::withVideosCount()->get()
-     */
+    // ← YENİ EKLENEN SCOPE
+    public function scopeShowOnHome(Builder $query): Builder
+    {
+        return $query->where('show_on_home', true);
+    }
+
     public function scopeWithVideosCount(Builder $query): Builder
     {
         return $query->withCount('videos');
     }
 
-    /**
-     * Aktif video sayısı ile getir (N+1 önleme) - ÖNERİLEN
-     * Kullanım: Category::withActiveVideosCount()->get()
-     */
     public function scopeWithActiveVideosCount(Builder $query): Builder
     {
         return $query->withCount([
@@ -163,9 +138,6 @@ class Category extends Model
         ]);
     }
 
-    /**
-     * Her iki sayımı da getir
-     */
     public function scopeWithAllCounts(Builder $query): Builder
     {
         return $query->withCount([
@@ -176,27 +148,16 @@ class Category extends Model
         ]);
     }
 
-    /**
-     * Videolar ile birlikte getir (Eager loading)
-     * Kullanım: Category::withVideos()->get()
-     */
     public function scopeWithVideos(Builder $query): Builder
     {
         return $query->with('videos');
     }
 
-    /**
-     * Sadece aktif videolar ile birlikte getir (Eager loading)
-     * Kullanım: Category::withActiveVideos()->get()
-     */
     public function scopeWithActiveVideos(Builder $query): Builder
     {
         return $query->with(['activeVideos']);
     }
 
-    /**
-     * En az bir aktif videosu olan kategoriler
-     */
     public function scopeHasActiveVideos(Builder $query): Builder
     {
         return $query->whereHas('videos', function ($query) {
@@ -204,10 +165,6 @@ class Category extends Model
         });
     }
 
-    /**
-     * API için optimize edilmiş scope
-     * Sadece gerekli alanları ve ilişkileri yükler
-     */
     public function scopeForApi(Builder $query): Builder
     {
         return $query->select(['id', 'name', 'slug', 'icon', 'order'])
@@ -216,101 +173,31 @@ class Category extends Model
             ->withActiveVideosCount();
     }
 
-    /**
-     * Admin paneli için optimize edilmiş scope
-     */
+    // ← YENİ EKLENEN SCOPE
+    public function scopeForHomePage(Builder $query): Builder
+    {
+        return $query->select(['id', 'name', 'slug', 'icon', 'order'])
+            ->active()
+            ->showOnHome()
+            ->ordered()
+            ->withActiveVideosCount();
+    }
+
     public function scopeForAdmin(Builder $query): Builder
     {
         return $query->withAllCounts()->ordered();
     }
-}
 
-// =============================================================================
-// MIGRATION: database/migrations/xxxx_create_categories_table.php
-// =============================================================================
-
-use Illuminate\Database\Migrations\Migration;
-use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Facades\Schema;
-
-return new class extends Migration
-{
+    // ← YENİ EKLENEN STATIC METOD
     /**
-     * Run the migrations.
+     * Ana sayfa için kategorileri getir (Cache'li)
      */
-    public function up(): void
+    public static function getHomeCategories()
     {
-        Schema::create('categories', function (Blueprint $table) {
-            $table->id();
-            $table->string('name', 100); // Uzunluk limiti performans için
-            $table->string('slug', 100)->unique();
-            $table->text('description')->nullable();
-            $table->string('icon', 255)->nullable();
-            $table->unsignedInteger('order')->default(0);
-            $table->boolean('is_active')->default(true);
-            $table->timestamps();
-
-            // Performans için indexler
-            $table->index('is_active');
-            $table->index('order');
-            $table->index(['is_active', 'order']); // Composite index (en çok kullanılan sorgu)
-        });
+        return Cache::remember(
+            'home_categories',
+            now()->addMinutes(30),
+            fn() => static::forHomePage()->get()
+        );
     }
-
-    /**
-     * Reverse the migrations.
-     */
-    public function down(): void
-    {
-        Schema::dropIfExists('categories');
-    }
-};
-
-// =============================================================================
-// KULLANIM ÖRNEKLERİ
-// =============================================================================
-
-/*
-
-// ❌ YANLIŞ - N+1 Problemi
-$categories = Category::all();
-foreach ($categories as $category) {
-    echo $category->getActiveVideosCount(); // Her kategori için ayrı sorgu!
 }
-
-// ✅ DOĞRU - Optimize Edilmiş
-$categories = Category::withActiveVideosCount()->get();
-foreach ($categories as $category) {
-    echo $category->active_videos_count; // Tek sorguda alındı!
-}
-
-// ✅ API için
-$categories = Category::forApi()->get();
-
-// ✅ Admin panel için
-$categories = Category::forAdmin()->paginate(20);
-
-// ✅ Aktif kategoriler, aktif video sayıları ile
-$categories = Category::active()
-    ->withActiveVideosCount()
-    ->ordered()
-    ->get();
-
-// ✅ En az bir aktif videosu olan kategoriler
-$categories = Category::hasActiveVideos()
-    ->withActiveVideosCount()
-    ->get();
-
-// ✅ Videolar ile birlikte (Eager loading)
-$category = Category::with('activeVideos')->find(1);
-
-// ✅ Tek kategori için
-$category = Category::withActiveVideosCount()->find(1);
-echo $category->active_videos_count;
-
-// ✅ Sadece belirli alanları çek (Select optimizasyonu)
-$categories = Category::select(['id', 'name', 'slug'])
-    ->active()
-    ->get();
-
-*/

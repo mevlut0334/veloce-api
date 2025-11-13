@@ -16,7 +16,6 @@ class User extends Authenticatable
 {
     use HasApiTokens, HasFactory, Notifiable;
 
-    // Cache süreleri (dakika)
     const CACHE_SUBSCRIPTION_TTL = 10;
     const CACHE_STATS_TTL = 30;
 
@@ -25,6 +24,7 @@ class User extends Authenticatable
         'email',
         'password',
         'is_active',
+        'is_admin',
         'last_activity_at',
     ];
 
@@ -35,16 +35,13 @@ class User extends Authenticatable
 
     protected $appends = [];
 
-    // Performans: Cast'leri method yerine property olarak tanımla (PHP 8.0+)
     protected $casts = [
         'email_verified_at' => 'datetime',
         'password' => 'hashed',
         'is_active' => 'boolean',
+        'is_admin' => 'boolean',
         'last_activity_at' => 'datetime',
     ];
-
-    // Performans: Sık kullanılan ilişkileri eager load et (opsiyonel)
-    // protected $with = ['activeSubscription']; // Dikkatli kullan!
 
     // ============================================
     // İLİŞKİLER - Optimize Edilmiş
@@ -53,7 +50,7 @@ class User extends Authenticatable
     public function userSubscriptions(): HasMany
     {
         return $this->hasMany(UserSubscription::class)
-            ->select(['id', 'user_id', 'plan_id', 'status', 'starts_at', 'expires_at']); // Sadece gerekli kolonlar
+            ->select(['id', 'user_id', 'plan_id', 'status', 'starts_at', 'expires_at']);
     }
 
     public function subscription(): HasOne
@@ -74,7 +71,7 @@ class User extends Authenticatable
     public function payments(): HasMany
     {
         return $this->hasMany(Payment::class)
-            ->select(['id', 'user_id', 'amount', 'status', 'created_at']); // Sadece gerekli kolonlar
+            ->select(['id', 'user_id', 'amount', 'status', 'created_at']);
     }
 
     public function playlists(): HasMany
@@ -86,7 +83,7 @@ class User extends Authenticatable
     public function favorites(): BelongsToMany
     {
         return $this->belongsToMany(Video::class, 'user_favorites')
-            ->select(['videos.id', 'title', 'slug', 'thumbnail']) // Sadece gerekli kolonlar
+            ->select(['videos.id', 'title', 'slug', 'thumbnail'])
             ->withTimestamps();
     }
 
@@ -110,9 +107,11 @@ class User extends Authenticatable
         return $query->where('is_active', false);
     }
 
-    /**
-     * BEST PRACTICE: whereExists kullanımı (whereHas'ten daha hızlı)
-     */
+    public function scopeAdmins(Builder $query): Builder
+    {
+        return $query->where('is_admin', true);
+    }
+
     public function scopeSubscribers(Builder $query): Builder
     {
         return $query->whereExists(function ($q) {
@@ -135,9 +134,6 @@ class User extends Authenticatable
         });
     }
 
-    /**
-     * JOIN ile optimized scope (daha da hızlı, subscription data'ya erişim gerekirse)
-     */
     public function scopeSubscribersWithData(Builder $query): Builder
     {
         return $query->join('user_subscriptions', function ($join) {
@@ -156,17 +152,12 @@ class User extends Authenticatable
     // HELPER METODLAR - Cache ile Optimize Edilmiş
     // ============================================
 
-    /**
-     * Cache'lenmiş subscriber kontrolü
-     */
     public function isSubscriber(): bool
     {
-        // İlişki yüklüyse DB'ye gitme
         if ($this->relationLoaded('activeSubscription')) {
             return $this->activeSubscription !== null;
         }
 
-        // Cache kullan
         return Cache::remember(
             "user_{$this->id}_is_subscriber",
             now()->addMinutes(self::CACHE_SUBSCRIPTION_TTL),
@@ -174,23 +165,15 @@ class User extends Authenticatable
         );
     }
 
-    /**
-     * Video erişim kontrolü - Optimize edilmiş
-     */
     public function hasAccessToVideo(Video $video): bool
     {
-        // Free video kontrolü (ucuz)
         if (!$video->is_premium) {
             return true;
         }
 
-        // Premium kontrolü
         return $this->isSubscriber();
     }
 
-    /**
-     * Subscription durumu - Cache'lenmiş
-     */
     public function subscriptionStatus(): string
     {
         if ($this->relationLoaded('activeSubscription')) {
@@ -220,9 +203,6 @@ class User extends Authenticatable
         );
     }
 
-    /**
-     * Subscription bitiş tarihi
-     */
     public function subscriptionExpiry(): ?string
     {
         $activeSub = $this->relationLoaded('activeSubscription')
@@ -232,9 +212,6 @@ class User extends Authenticatable
         return $activeSub?->expires_at?->format('d.m.Y H:i');
     }
 
-    /**
-     * Kalan gün sayısı
-     */
     public function remainingSubscriptionDays(): int
     {
         $activeSub = $this->relationLoaded('activeSubscription')
@@ -249,18 +226,12 @@ class User extends Authenticatable
         return max(0, (int) $days);
     }
 
-    /**
-     * Cache temizleme
-     */
     public function clearSubscriptionCache(): void
     {
         Cache::forget("user_{$this->id}_is_subscriber");
         Cache::forget("user_{$this->id}_subscription_status");
     }
 
-    /**
-     * Toplu veri yükleme - Optimize edilmiş
-     */
     public function loadSubscriptionData(): self
     {
         return $this->load([
@@ -268,9 +239,6 @@ class User extends Authenticatable
         ]);
     }
 
-    /**
-     * Dashboard için gerekli tüm data'yı yükle
-     */
     public function loadDashboardData(): self
     {
         return $this->load([
@@ -286,7 +254,6 @@ class User extends Authenticatable
 
     protected static function booted(): void
     {
-        // Subscription güncellendiğinde cache temizle
         static::updated(function (User $user) {
             if ($user->wasChanged(['is_active'])) {
                 $user->clearSubscriptionCache();
@@ -302,9 +269,6 @@ class User extends Authenticatable
     // İSTATİSTİK METODLARI - Cache'lenmiş
     // ============================================
 
-    /**
-     * Kullanıcı istatistikleri
-     */
     public function getStats(): array
     {
         return Cache::remember(
@@ -319,9 +283,6 @@ class User extends Authenticatable
         );
     }
 
-    /**
-     * Son aktiviteleri getir
-     */
     public function recentViews(int $limit = 10)
     {
         return $this->views()
