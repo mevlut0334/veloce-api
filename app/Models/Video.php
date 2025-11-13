@@ -39,6 +39,7 @@ class Video extends Model
     protected function casts(): array
     {
         return [
+            'orientation' => 'boolean', // 0=horizontal, 1=vertical (database)
             'is_premium' => 'boolean',
             'is_active' => 'boolean',
             'is_processed' => 'boolean',
@@ -54,13 +55,49 @@ class Video extends Model
     // Resource'larda otomatik kullanılacak accessor'lar
     protected $appends = [];
 
-    public const ORIENTATION_HORIZONTAL = 'horizontal';
-    public const ORIENTATION_VERTICAL = 'vertical';
+    // Orientation sabitleri
+    public const ORIENTATION_HORIZONTAL = 0; // Database değeri
+    public const ORIENTATION_VERTICAL = 1;   // Database değeri
 
-    // Video limitleri (bilgi amaçlı - validasyonda kullanılacak)
+    public const ORIENTATION_HORIZONTAL_STRING = 'horizontal'; // API/Form değeri
+    public const ORIENTATION_VERTICAL_STRING = 'vertical';     // API/Form değeri
+
+    // Video limitleri
     public const MAX_DURATION_SECONDS = 600; // 10 dakika
     public const MAX_FILE_SIZE_MB = 2048; // 2GB
     public const MAX_FILE_SIZE_BYTES = self::MAX_FILE_SIZE_MB * 1024 * 1024;
+
+    // =========================================================================
+    // ORIENTATION ACCESSOR/MUTATOR
+    // =========================================================================
+
+    /**
+     * Orientation getter - Database'den boolean alır, string döner
+     * API'de "horizontal" veya "vertical" olarak gösterilir
+     */
+    public function getOrientationAttribute($value): string
+    {
+        return $value === self::ORIENTATION_VERTICAL
+            ? self::ORIENTATION_VERTICAL_STRING
+            : self::ORIENTATION_HORIZONTAL_STRING;
+    }
+
+    /**
+     * Orientation setter - String alır, boolean kaydeder
+     * Form'dan "horizontal"/"vertical" gelir, 0/1 olarak saklanır
+     */
+    public function setOrientationAttribute($value): void
+    {
+        // String olarak gelirse
+        if (is_string($value)) {
+            $this->attributes['orientation'] =
+                $value === self::ORIENTATION_VERTICAL_STRING ? self::ORIENTATION_VERTICAL : self::ORIENTATION_HORIZONTAL;
+            return;
+        }
+
+        // Boolean/Integer olarak gelirse
+        $this->attributes['orientation'] = (int) $value;
+    }
 
     // =========================================================================
     // ACCESSOR METODLARI - Resource'larda kullanılacak
@@ -241,11 +278,17 @@ class Video extends Model
         return $query->where('is_premium', false);
     }
 
+    /**
+     * Yatay videolar (boolean ile karşılaştırma - PERFORMANSLI)
+     */
     public function scopeHorizontal($query)
     {
         return $query->where('orientation', self::ORIENTATION_HORIZONTAL);
     }
 
+    /**
+     * Dikey videolar (boolean ile karşılaştırma - PERFORMANSLI)
+     */
     public function scopeVertical($query)
     {
         return $query->where('orientation', self::ORIENTATION_VERTICAL);
@@ -402,6 +445,22 @@ class Video extends Model
         return $success;
     }
 
+    /**
+     * Orientation helper - Boolean kontrolü
+     */
+    public function isHorizontal(): bool
+    {
+        return $this->attributes['orientation'] === self::ORIENTATION_HORIZONTAL;
+    }
+
+    /**
+     * Orientation helper - Boolean kontrolü
+     */
+    public function isVertical(): bool
+    {
+        return $this->attributes['orientation'] === self::ORIENTATION_VERTICAL;
+    }
+
     // =========================================================================
     // STATIC METODLAR
     // =========================================================================
@@ -447,7 +506,7 @@ class Video extends Model
 
         return static::active()
             ->where('id', '!=', $this->id)
-            ->where('orientation', $this->orientation)
+            ->where('orientation', $this->attributes['orientation']) // RAW boolean kullan
             ->when($categoryIds->isNotEmpty(), function($query) use ($categoryIds) {
                 $query->whereHas('categories', function($q) use ($categoryIds) {
                     $q->whereIn('categories.id', $categoryIds);
@@ -484,6 +543,11 @@ class Video extends Model
 
             if (is_null($video->is_processed)) {
                 $video->is_processed = false;
+            }
+
+            // Orientation default: horizontal
+            if (is_null($video->orientation)) {
+                $video->orientation = self::ORIENTATION_HORIZONTAL;
             }
         });
 
