@@ -6,6 +6,7 @@ use App\Http\Controllers\Admin\HomeSliderController;
 use App\Http\Controllers\Admin\HomeSectionController;
 use App\Http\Controllers\Admin\CategoryController;
 use App\Http\Controllers\Api\TagController;
+use App\Http\Controllers\Admin\SubscriptionController;
 
 Route::get('/', function () {
     return view('welcome');
@@ -110,6 +111,35 @@ Route::prefix('admin')->name('admin.')->middleware(['auth:sanctum', 'is_admin'])
         Route::get('/unused', [TagController::class, 'unused'])->name('unused');
         Route::post('/cleanup', [TagController::class, 'cleanup'])->name('cleanup');
         Route::post('/clear-cache', [TagController::class, 'clearCache'])->name('clear-cache');
+    });
+
+    // =====================================================================
+    // SUBSCRIPTION MANAGEMENT
+   // =====================================================================
+    Route::prefix('subscriptions')->name('subscriptions.')->group(function () {
+    // İstatistikler
+       Route::get('/stats', [SubscriptionController::class, 'stats'])->name('stats');
+       Route::get('/revenue', [SubscriptionController::class, 'revenue'])->name('revenue');
+
+    // Özel listeler
+       Route::get('/active', [SubscriptionController::class, 'active'])->name('active');
+       Route::get('/expired', [SubscriptionController::class, 'expired'])->name('expired');
+       Route::get('/expiring', [SubscriptionController::class, 'expiring'])->name('expiring');
+       Route::get('/manual', [SubscriptionController::class, 'manual'])->name('manual');
+       Route::get('/paid', [SubscriptionController::class, 'paid'])->name('paid');
+
+    // Abonelik işlemleri
+       Route::post('/{id}/extend', [SubscriptionController::class, 'extend'])->name('extend');
+       Route::post('/{id}/cancel', [SubscriptionController::class, 'cancel'])->name('cancel');
+       Route::post('/{id}/activate', [SubscriptionController::class, 'activate'])->name('activate');
+       Route::post('/{id}/renew', [SubscriptionController::class, 'renew'])->name('renew');
+
+    // CRUD
+       Route::get('/', [SubscriptionController::class, 'index'])->name('index');
+       Route::post('/', [SubscriptionController::class, 'store'])->name('store');
+       Route::get('/{id}', [SubscriptionController::class, 'show'])->name('show');
+       Route::put('/{id}', [SubscriptionController::class, 'update'])->name('update');
+       Route::delete('/{id}', [SubscriptionController::class, 'destroy'])->name('destroy');
     });
 
     // =====================================================================
