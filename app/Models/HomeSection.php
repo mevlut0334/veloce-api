@@ -1,21 +1,17 @@
 <?php
 
-// =============================================================================
-// MODEL: App\Models\HomeSection.php
-// =============================================================================
-
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
-use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\DB;
 
 class HomeSection extends Model
 {
     use HasFactory;
+
+    protected $table = 'home_sections';
 
     protected $fillable = [
         'title',
@@ -26,57 +22,72 @@ class HomeSection extends Model
         'limit',
     ];
 
-    protected $casts = [
-        'is_active' => 'boolean',
-        'content_data' => 'array',
-        'order' => 'integer',
-        'limit' => 'integer',
-    ];
+    protected function casts(): array
+    {
+        return [
+            'is_active' => 'boolean',
+            'content_data' => 'array',
+            'order' => 'integer',
+            'limit' => 'integer',
+            'created_at' => 'datetime',
+            'updated_at' => 'datetime',
+        ];
+    }
 
     // Content type constants
-    const TYPE_VIDEO_IDS = 'video_ids';
-    const TYPE_CATEGORY = 'category';
-    const TYPE_TRENDING = 'trending';
-    const TYPE_RECENT = 'recent';
+    public const TYPE_VIDEO_IDS = 'video_ids';
+    public const TYPE_CATEGORY = 'category';
+    public const TYPE_TRENDING = 'trending';
+    public const TYPE_RECENT = 'recent';
 
-    protected static function booted()
-    {
-        // Cache temizleme
-        static::saved(function ($section) {
-            $section->clearCache();
-            static::clearAllSectionsCache();
-        });
+    public const CONTENT_TYPES = [
+        self::TYPE_VIDEO_IDS,
+        self::TYPE_CATEGORY,
+        self::TYPE_TRENDING,
+        self::TYPE_RECENT,
+    ];
 
-        static::deleted(function ($section) {
-            $section->clearCache();
-            static::clearAllSectionsCache();
-        });
-    }
+    // Default limits
+    public const DEFAULT_LIMIT = 20;
+    public const MAX_LIMIT = 50;
 
     // =========================================================================
     // SCOPES
     // =========================================================================
 
+    /**
+     * Aktif section'lar
+     */
     public function scopeActive(Builder $query): Builder
     {
         return $query->where('is_active', true);
     }
 
+    /**
+     * Sıralı section'lar (order ASC)
+     */
     public function scopeOrdered(Builder $query): Builder
     {
         return $query->orderBy('order', 'asc');
     }
 
     /**
-     * Sadece gerekli alanları seç
+     * Sadece gerekli alanları seç (performans)
      */
     public function scopeMinimal(Builder $query): Builder
     {
-        return $query->select(['id', 'title', 'content_type', 'content_data', 'limit']);
+        return $query->select([
+            'id',
+            'title',
+            'content_type',
+            'content_data',
+            'order',
+            'limit',
+        ]);
     }
 
     /**
-     * Ana sayfa için optimize edilmiş scope
+     * Ana sayfa için hazır scope
      */
     public function scopeForHomePage(Builder $query): Builder
     {
@@ -84,57 +95,43 @@ class HomeSection extends Model
     }
 
     // =========================================================================
-    // VIDEO GETİRME - OPTIMIZE EDİLMİŞ
+    // VIDEO GETİRME METODları
     // =========================================================================
 
     /**
-     * İçeriği getir (Cache'li ve optimize edilmiş)
+     * Content type'a göre videoları getir
      */
     public function getVideos(): Collection
     {
-        // Cache kullan (5 dakika)
-        return Cache::remember(
-            $this->getCacheKey('videos'),
-            now()->addMinutes(5),
-            fn() => $this->fetchVideos()
-        );
-    }
-
-    /**
-     * Videoları getir (Cache olmadan)
-     */
-    protected function fetchVideos(): Collection
-    {
         $query = Video::query()
             ->active()
-            ->with(['categories:id,name,slug']) // Eager loading
+            ->processed()
+            ->with(['categories:id,name,slug', 'tags:id,name,slug'])
             ->select([
-                'id', 'title', 'slug', 'thumbnail',
-                'duration', 'views_count', 'created_at'
-            ]); // Sadece gerekli alanlar
+                'id',
+                'title',
+                'slug',
+                'thumbnail_path',
+                'duration',
+                'view_count',
+                'is_premium',
+                'orientation',
+                'created_at',
+            ]);
 
-        switch ($this->content_type) {
-            case self::TYPE_VIDEO_IDS:
-                return $this->getVideosByIds($query);
-
-            case self::TYPE_CATEGORY:
-                return $this->getVideosByCategory($query);
-
-            case self::TYPE_TRENDING:
-                return $this->getTrendingVideos($query);
-
-            case self::TYPE_RECENT:
-                return $this->getRecentVideos($query);
-
-            default:
-                return new Collection();
-        }
+        return match($this->content_type) {
+            self::TYPE_VIDEO_IDS => $this->getVideosByIds($query),
+            self::TYPE_CATEGORY => $this->getVideosByCategory($query),
+            self::TYPE_TRENDING => $this->getTrendingVideos($query),
+            self::TYPE_RECENT => $this->getRecentVideos($query),
+            default => new Collection(),
+        };
     }
 
     /**
      * Manuel seçilen videolar (ID sırasını koruyarak)
      */
-    protected function getVideosByIds(Builder $query): Collection
+    private function getVideosByIds(Builder $query): Collection
     {
         $videoIds = $this->content_data['video_ids'] ?? [];
 
@@ -142,22 +139,20 @@ class HomeSection extends Model
             return new Collection();
         }
 
-        // ID sırasını koruyarak getir - Optimize edilmiş
-        $orderCase = collect($videoIds)
-            ->map(fn($id, $index) => "WHEN {$id} THEN {$index}")
-            ->implode(' ');
+        // ID sırasını koruyarak getir - MySQL FIELD() fonksiyonu
+        $idsString = implode(',', array_map('intval', $videoIds));
 
         return $query
             ->whereIn('id', $videoIds)
-            ->orderByRaw("CASE id {$orderCase} END")
-            ->limit($this->limit)
+            ->orderByRaw("FIELD(id, {$idsString})")
+            ->limit($this->limit ?? self::DEFAULT_LIMIT)
             ->get();
     }
 
     /**
      * Kategoriye göre videolar
      */
-    protected function getVideosByCategory(Builder $query): Collection
+    private function getVideosByCategory(Builder $query): Collection
     {
         $categoryId = $this->content_data['category_id'] ?? null;
 
@@ -165,113 +160,44 @@ class HomeSection extends Model
             return new Collection();
         }
 
-        // JOIN kullanarak daha performanslı
         return $query
-            ->join('category_video', 'videos.id', '=', 'category_video.video_id')
-            ->where('category_video.category_id', $categoryId)
-            ->latest('videos.created_at')
-            ->limit($this->limit)
+            ->whereHas('categories', function($q) use ($categoryId) {
+                $q->where('categories.id', $categoryId);
+            })
+            ->latest('created_at')
+            ->limit($this->limit ?? self::DEFAULT_LIMIT)
             ->get();
     }
 
     /**
-     * Trend videolar (Son 7 günde en çok izlenen)
+     * Trend videolar (Son X günde en çok izlenen)
      */
-    protected function getTrendingVideos(Builder $query): Collection
+    private function getTrendingVideos(Builder $query): Collection
     {
         $days = $this->content_data['days'] ?? 7;
 
-        // Subquery ile optimize edilmiş trending hesaplama
+        // Son X günde oluşturulan videoları getir, view_count'a göre sırala
         return $query
-            ->addSelect([
-                'recent_views_count' => DB::table('video_views')
-                    ->selectRaw('COUNT(*)')
-                    ->whereColumn('video_id', 'videos.id')
-                    ->where('viewed_at', '>=', now()->subDays($days))
-            ])
-            ->orderByDesc('recent_views_count')
-            ->orderByDesc('views_count') // Fallback sıralama
-            ->limit($this->limit)
+            ->where('created_at', '>=', now()->subDays($days))
+            ->orderByDesc('view_count')
+            ->limit($this->limit ?? self::DEFAULT_LIMIT)
             ->get();
     }
 
     /**
      * Son eklenen videolar
      */
-    protected function getRecentVideos(Builder $query): Collection
+    private function getRecentVideos(Builder $query): Collection
     {
         return $query
             ->latest('created_at')
-            ->limit($this->limit)
+            ->limit($this->limit ?? self::DEFAULT_LIMIT)
             ->get();
-    }
-
-    // =========================================================================
-    // CACHE YÖNETİMİ
-    // =========================================================================
-
-    /**
-     * Cache key oluştur
-     */
-    private function getCacheKey(string $suffix): string
-    {
-        // content_data değişikliklerini cache key'e dahil et
-        $dataHash = md5(json_encode($this->content_data));
-        return "home_section_{$this->id}_{$this->content_type}_{$dataHash}_{$suffix}";
-    }
-
-    /**
-     * Section cache'ini temizle
-     */
-    public function clearCache(): void
-    {
-        Cache::forget($this->getCacheKey('videos'));
-    }
-
-    /**
-     * Tüm section cache'lerini temizle
-     */
-    public static function clearAllSectionsCache(): void
-    {
-        Cache::forget('home_sections_all');
-        Cache::forget('home_sections_with_videos');
     }
 
     // =========================================================================
     // HELPER METODLAR
     // =========================================================================
-
-    /**
-     * Ana sayfa için tüm section'ları videolarıyla birlikte getir
-     * Bu metod controller'da kullanılmalı
-     */
-    public static function getHomeSectionsWithVideos(): Collection
-    {
-        return Cache::remember(
-            'home_sections_with_videos',
-            now()->addMinutes(10),
-            function () {
-                $sections = static::forHomePage()->get();
-
-                // Her section için videoları yükle
-                return $sections->map(function ($section) {
-                    $section->videos = $section->getVideos();
-                    return $section;
-                })->filter(function ($section) {
-                    // Boş section'ları filtrele
-                    return $section->videos->isNotEmpty();
-                });
-            }
-        );
-    }
-
-    /**
-     * Section'ın video sayısını döndür (Cache'li)
-     */
-    public function getVideosCount(): int
-    {
-        return $this->getVideos()->count();
-    }
 
     /**
      * Content type'ı insan okunabilir formata çevir
@@ -286,101 +212,169 @@ class HomeSection extends Model
             default => 'Bilinmeyen',
         };
     }
-}
 
-// =============================================================================
-// MIGRATION: database/migrations/xxxx_create_home_sections_table.php
-// =============================================================================
-
-use Illuminate\Database\Migrations\Migration;
-use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Facades\Schema;
-
-return new class extends Migration
-{
-    public function up(): void
+    /**
+     * Section'ın video sayısını döndür
+     */
+    public function getVideosCount(): int
     {
-        Schema::create('home_sections', function (Blueprint $table) {
-            $table->id();
-            $table->string('title', 100);
-            $table->enum('content_type', ['video_ids', 'category', 'trending', 'recent'])
-                  ->default('recent');
-            $table->json('content_data')->nullable();
-            $table->unsignedInteger('order')->default(0);
-            $table->boolean('is_active')->default(true);
-            $table->unsignedInteger('limit')->default(10);
-            $table->timestamps();
+        return $this->getVideos()->count();
+    }
 
-            // Performans için indexler
-            $table->index(['is_active', 'order']); // Composite index
-            $table->index('content_type');
+    /**
+     * Content data'dan kategori adını al (TYPE_CATEGORY için)
+     */
+    public function getCategoryName(): ?string
+    {
+        if ($this->content_type !== self::TYPE_CATEGORY) {
+            return null;
+        }
+
+        $categoryId = $this->content_data['category_id'] ?? null;
+
+        if (!$categoryId) {
+            return null;
+        }
+
+        return Category::where('id', $categoryId)->value('name');
+    }
+
+    /**
+     * Content type için gerekli data'nın dolu olup olmadığını kontrol et
+     */
+    public function hasValidContentData(): bool
+    {
+        return match($this->content_type) {
+            self::TYPE_VIDEO_IDS => !empty($this->content_data['video_ids']),
+            self::TYPE_CATEGORY => !empty($this->content_data['category_id']),
+            self::TYPE_TRENDING => true, // days opsiyonel
+            self::TYPE_RECENT => true, // data gerektirmiyor
+            default => false,
+        };
+    }
+
+    /**
+     * Section'ı bir sıra yukarı taşı
+     */
+    public function moveUp(): bool
+    {
+        $previousSection = static::where('order', '<', $this->order)
+            ->orderByDesc('order')
+            ->first();
+
+        if (!$previousSection) {
+            return false;
+        }
+
+        // Sıraları değiştir
+        $tempOrder = $this->order;
+        $this->order = $previousSection->order;
+        $previousSection->order = $tempOrder;
+
+        $this->save();
+        $previousSection->save();
+
+        return true;
+    }
+
+    /**
+     * Section'ı bir sıra aşağı taşı
+     */
+    public function moveDown(): bool
+    {
+        $nextSection = static::where('order', '>', $this->order)
+            ->orderBy('order')
+            ->first();
+
+        if (!$nextSection) {
+            return false;
+        }
+
+        // Sıraları değiştir
+        $tempOrder = $this->order;
+        $this->order = $nextSection->order;
+        $nextSection->order = $tempOrder;
+
+        $this->save();
+        $nextSection->save();
+
+        return true;
+    }
+
+    // =========================================================================
+    // STATIC METODLAR
+    // =========================================================================
+
+    /**
+     * Yeni section için bir sonraki order değerini al
+     */
+    public static function getNextOrder(): int
+    {
+        return (static::max('order') ?? 0) + 1;
+    }
+
+    /**
+     * Tüm section'ların sıralamasını yeniden düzenle
+     * [1, 3, 5, 7] -> [1, 2, 3, 4]
+     */
+    public static function reorderAll(): void
+    {
+        $sections = static::ordered()->get(['id', 'order']);
+
+        $sections->each(function ($section, $index) {
+            if ($section->order !== $index + 1) {
+                $section->update(['order' => $index + 1]);
+            }
         });
     }
 
-    public function down(): void
+    /**
+     * Content type'a göre section sayısını döndür
+     */
+    public static function getStatistics(): array
     {
-        Schema::dropIfExists('home_sections');
+        return [
+            'total' => static::count(),
+            'active' => static::active()->count(),
+            'video_ids' => static::where('content_type', self::TYPE_VIDEO_IDS)->count(),
+            'category' => static::where('content_type', self::TYPE_CATEGORY)->count(),
+            'trending' => static::where('content_type', self::TYPE_TRENDING)->count(),
+            'recent' => static::where('content_type', self::TYPE_RECENT)->count(),
+        ];
     }
-};
 
-// =============================================================================
-// KULLANIM ÖRNEKLERİ
-// =============================================================================
+    // =========================================================================
+    // EVENT HOOKS
+    // =========================================================================
 
-/*
-
-// ❌ YANLIŞ - N+1 ve cache yok
-$sections = HomeSection::active()->ordered()->get();
-foreach ($sections as $section) {
-    $videos = $section->getVideos(); // Her seferinde sorgu atıyor!
-}
-
-// ✅ DOĞRU - Tek cache'li çağrı
-$sections = HomeSection::getHomeSectionsWithVideos();
-foreach ($sections as $section) {
-    foreach ($section->videos as $video) {
-        echo $video->title;
-    }
-}
-
-// ✅ Controller kullanımı
-class HomeController extends Controller
-{
-    public function index()
+    protected static function booted(): void
     {
-        $sections = HomeSection::getHomeSectionsWithVideos();
+        static::creating(function ($section) {
+            // Yeni section için order değeri
+            if (is_null($section->order)) {
+                $section->order = static::getNextOrder();
+            }
 
-        return view('home', compact('sections'));
+            // Default limit
+            if (is_null($section->limit)) {
+                $section->limit = self::DEFAULT_LIMIT;
+            }
+
+            // Default is_active
+            if (is_null($section->is_active)) {
+                $section->is_active = true;
+            }
+
+            // content_data boşsa boş array yap
+            if (is_null($section->content_data)) {
+                $section->content_data = [];
+            }
+        });
+
+        static::deleting(function ($section) {
+            // Section silindiğinde sıralamaları düzenle
+            static::where('order', '>', $section->order)
+                ->decrement('order');
+        });
     }
 }
-
-// ✅ Blade kullanımı
-@foreach($sections as $section)
-    <div class="section">
-        <h2>{{ $section->title }}</h2>
-        <div class="videos">
-            @foreach($section->videos as $video)
-                <div class="video-card">
-                    <img src="{{ $video->thumbnail }}">
-                    <h3>{{ $video->title }}</h3>
-                </div>
-            @endforeach
-        </div>
-    </div>
-@endforeach
-
-// ✅ Cache temizleme (Admin panelinde section güncellendiğinde)
-$section->update($data);
-$section->clearCache(); // Otomatik çalışıyor ama manuel de çağırabilirsiniz
-
-// ✅ Tüm cache'i temizleme
-HomeSection::clearAllSectionsCache();
-
-// ✅ API endpoint
-Route::get('/api/home', function () {
-    return response()->json([
-        'sections' => HomeSection::getHomeSectionsWithVideos()
-    ]);
-});
-
-*/

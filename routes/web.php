@@ -3,6 +3,7 @@
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Admin\VideoController;
 use App\Http\Controllers\Admin\HomeSliderController;
+use App\Http\Controllers\Admin\HomeSectionController;
 use App\Http\Controllers\Admin\CategoryController;
 use App\Http\Controllers\Api\TagController;
 
@@ -55,6 +56,26 @@ Route::prefix('admin')->name('admin.')->middleware(['auth:sanctum', 'is_admin'])
 
         Route::post('/{slider}/toggle-active', [HomeSliderController::class, 'toggleActive'])->name('toggle-active');
         Route::post('/reorder', [HomeSliderController::class, 'reorder'])->name('reorder');
+    });
+
+    // =====================================================================
+    // HOME SECTION MANAGEMENT
+    // =====================================================================
+    Route::prefix('home-sections')->name('home-sections.')->group(function () {
+        Route::get('/statistics', [HomeSectionController::class, 'statistics'])->name('statistics');
+        Route::get('/{id}/preview', [HomeSectionController::class, 'preview'])->name('preview');
+
+        Route::patch('/{id}/toggle-active', [HomeSectionController::class, 'toggleActive'])->name('toggle-active');
+        Route::patch('/{id}/move-up', [HomeSectionController::class, 'moveUp'])->name('move-up');
+        Route::patch('/{id}/move-down', [HomeSectionController::class, 'moveDown'])->name('move-down');
+
+        Route::post('/reorder', [HomeSectionController::class, 'reorder'])->name('reorder');
+
+        Route::get('/', [HomeSectionController::class, 'index'])->name('index');
+        Route::post('/', [HomeSectionController::class, 'store'])->name('store');
+        Route::get('/{id}', [HomeSectionController::class, 'show'])->name('show');
+        Route::put('/{id}', [HomeSectionController::class, 'update'])->name('update');
+        Route::delete('/{id}', [HomeSectionController::class, 'destroy'])->name('destroy');
     });
 
     // =====================================================================
