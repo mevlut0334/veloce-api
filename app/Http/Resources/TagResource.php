@@ -18,8 +18,28 @@ class TagResource extends JsonResource
             'id' => $this->id,
             'name' => $this->name,
             'slug' => $this->slug,
-            'video_count' => $this->when(isset($this->videos_count), $this->videos_count), // video sayısı (opsiyonel)
+            'description' => $this->description,
+            'is_active' => $this->is_active,
+            'url' => $this->getUrl(),
+
+            // Video sayıları (eğer withCount ile yüklenmişse)
+            'videos_count' => $this->when(
+                isset($this->videos_count),
+                $this->videos_count
+            ),
+            'active_videos_count' => $this->when(
+                isset($this->active_videos_count),
+                $this->active_videos_count
+            ),
+
+            // İlişkili videolar (eğer yüklenmişse)
+            'videos' => VideoResource::collection(
+                $this->whenLoaded('activeVideos')
+            ),
+
+            // Zaman bilgileri
             'created_at' => $this->created_at?->toISOString(),
+            'updated_at' => $this->updated_at?->toISOString(),
         ];
     }
 }

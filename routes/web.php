@@ -3,6 +3,8 @@
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Admin\VideoController;
 use App\Http\Controllers\Admin\HomeSliderController;
+use App\Http\Controllers\Admin\CategoryController;
+use App\Http\Controllers\Api\TagController;
 
 Route::get('/', function () {
     return view('welcome');
@@ -56,14 +58,38 @@ Route::prefix('admin')->name('admin.')->middleware(['auth:sanctum', 'is_admin'])
     });
 
     // =====================================================================
-    // CATEGORY MANAGEMENT (İleride eklenecek)
+    // CATEGORY MANAGEMENT
     // =====================================================================
-    // Route::resource('categories', CategoryController::class);
+    Route::prefix('categories')->name('categories.')->group(function () {
+        Route::get('/', [CategoryController::class, 'index'])->name('index');
+        Route::get('/create', [CategoryController::class, 'create'])->name('create');
+        Route::post('/', [CategoryController::class, 'store'])->name('store');
+        Route::get('/{category}', [CategoryController::class, 'show'])->name('show');
+        Route::get('/{category}/edit', [CategoryController::class, 'edit'])->name('edit');
+        Route::put('/{category}', [CategoryController::class, 'update'])->name('update');
+        Route::delete('/{category}', [CategoryController::class, 'destroy'])->name('destroy');
+
+        Route::post('/{category}/toggle-active', [CategoryController::class, 'toggleActive'])->name('toggle-active');
+        Route::post('/{category}/toggle-show-on-home', [CategoryController::class, 'toggleShowOnHome'])->name('toggle-show-on-home');
+        Route::post('/reorder', [CategoryController::class, 'reorder'])->name('reorder');
+    });
 
     // =====================================================================
-    // TAG MANAGEMENT (İleride eklenecek)
+    // TAG MANAGEMENT
     // =====================================================================
-    // Route::resource('tags', TagController::class);
+    Route::prefix('tags')->name('tags.')->group(function () {
+        Route::get('/', [TagController::class, 'adminIndex'])->name('index');
+        Route::post('/', [TagController::class, 'store'])->name('store');
+        Route::put('/{tag}', [TagController::class, 'update'])->name('update');
+        Route::delete('/{tag}', [TagController::class, 'destroy'])->name('destroy');
+
+        Route::post('/{tag}/toggle-status', [TagController::class, 'toggleStatus'])->name('toggle-status');
+
+        Route::get('/statistics', [TagController::class, 'statistics'])->name('statistics');
+        Route::get('/unused', [TagController::class, 'unused'])->name('unused');
+        Route::post('/cleanup', [TagController::class, 'cleanup'])->name('cleanup');
+        Route::post('/clear-cache', [TagController::class, 'clearCache'])->name('clear-cache');
+    });
 
     // =====================================================================
     // USER MANAGEMENT (İleride eklenecek)
@@ -74,4 +100,16 @@ Route::prefix('admin')->name('admin.')->middleware(['auth:sanctum', 'is_admin'])
     // SETTINGS (İleride eklenecek)
     // =====================================================================
     // Route::get('/settings', [SettingsController::class, 'index'])->name('settings.index');
+});
+
+// =========================================================================
+// PUBLIC TAG ROUTES
+// =========================================================================
+Route::prefix('tags')->name('tags.')->group(function () {
+    Route::get('/', [TagController::class, 'index'])->name('index');
+    Route::get('/popular', [TagController::class, 'popular'])->name('popular');
+    Route::get('/cloud', [TagController::class, 'cloud'])->name('cloud');
+    Route::get('/search', [TagController::class, 'search'])->name('search');
+    Route::get('/{slug}', [TagController::class, 'show'])->name('show');
+    Route::get('/{slug}/videos', [TagController::class, 'videos'])->name('videos');
 });

@@ -19,11 +19,21 @@ class CategoryResource extends JsonResource
             'name' => $this->name,
             'slug' => $this->slug,
             'description' => $this->description,
-            'icon' => $this->icon, // ikon adı veya URL (opsiyonel)
-            'color' => $this->color, // hex renk kodu (opsiyonel, UI için)
+            'icon' => $this->icon,
+            'order' => $this->order,
             'is_active' => (bool) $this->is_active,
-            'video_count' => $this->when(isset($this->videos_count), $this->videos_count), // video sayısı (opsiyonel)
+            'show_on_home' => (bool) $this->show_on_home,
+
+            // Video sayıları (eager load edilmişse)
+            'videos_count' => $this->when(isset($this->videos_count), $this->videos_count),
+            'active_videos_count' => $this->when(isset($this->active_videos_count), $this->active_videos_count),
+
+            // İlişkili videolar (varsa)
+            'videos' => VideoListResource::collection($this->whenLoaded('videos')),
+
+            // Timestamps
             'created_at' => $this->created_at?->toISOString(),
+            'updated_at' => $this->updated_at?->toISOString(),
         ];
     }
 }
