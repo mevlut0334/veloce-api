@@ -11,8 +11,10 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Cache;
+use Filament\Models\Contracts\FilamentUser;
+use Filament\Panel;
 
-class User extends Authenticatable
+class User extends Authenticatable implements FilamentUser
 {
     use HasApiTokens, HasFactory, Notifiable;
 
@@ -41,6 +43,19 @@ class User extends Authenticatable
         'is_admin' => 'boolean',
         'last_activity_at' => 'datetime',
     ];
+
+    // ============================================
+    // FILAMENT PANEL ERİŞİM KONTROLÜ
+    // ============================================
+
+    /**
+     * Filament admin paneline erişim kontrolü
+     */
+    public function canAccessPanel(Panel $panel): bool
+    {
+        // Sadece admin ve aktif kullanıcılar girebilir
+        return $this->is_admin && $this->is_active;
+    }
 
     // ============================================
     // İLİŞKİLER - Optimize Edilmiş
