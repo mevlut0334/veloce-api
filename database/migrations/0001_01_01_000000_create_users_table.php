@@ -17,7 +17,6 @@ return new class extends Migration
             // Temel alanlar - String uzunlukları belirlendi
             $table->string('name', 100); // Uzunluk limiti performans için
             $table->string('email', 150)->unique();
-            $table->string('phone', 20)->index(); // Unique yerine index (daha hızlı)
             $table->string('password', 255); // Bcrypt için yeterli
             $table->string('avatar', 500)->nullable(); // URL için yeterli uzunluk
 
@@ -28,6 +27,7 @@ return new class extends Migration
 
             // Status alanları
             $table->boolean('is_active')->default(true)->index();
+            $table->boolean('is_admin')->default(false)->index(); // Admin kontrolü için
             $table->timestamp('last_activity_at')->nullable()->index();
 
             $table->rememberToken();
@@ -35,7 +35,6 @@ return new class extends Migration
 
             // PERFORMANS İNDEXLERİ - Optimize edilmiş
             // Email unique zaten otomatik index
-            // Phone index yukarıda eklendi
 
             // Composite indexler - En sık kullanılan sorgular için
             $table->index(['subscription_type', 'is_active', 'subscription_ends_at'], 'idx_subscription_status');
