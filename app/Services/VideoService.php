@@ -10,7 +10,12 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use App\Jobs\ProcessVideoUpload;
+use App\Jobs\ProcessThumbnailUpload;
+use App\Jobs\OptimizeVideo;
+use App\Jobs\GenerateThumbnail;
 
 class VideoService implements VideoServiceInterface
 {
@@ -41,60 +46,97 @@ class VideoService implements VideoServiceInterface
         DB::beginTransaction();
 
         try {
-            // 1. Video kaydını oluştur (inactive)
+            // 1. ÖNCE DOSYALARI STORE ET
+            $tempVideoPath = null;
+            $tempThumbnailPath = null;
+
+            if ($videoFile) {
+                $tempVideoPath = $videoFile->store('videos/temp', 'public');
+                Log::info('Video geçici klasöre yüklendi', [
+                    'temp_path' => $tempVideoPath,
+                    'size' => $videoFile->getSize()
+                ]);
+            }
+
+            if ($thumbnailFile) {
+                $tempThumbnailPath = $thumbnailFile->store('thumbnails/temp', 'public');
+                Log::info('Thumbnail geçici klasöre yüklendi', [
+                    'temp_path' => $tempThumbnailPath
+                ]);
+            }
+
+            // 2. Video kaydını oluştur
             $videoData = [
                 'title' => $data['title'],
                 'slug' => Str::slug($data['title']),
                 'description' => $data['description'] ?? null,
+                'orientation' => null, // OptimizeVideo job'u otomatik belirleyecek
                 'is_premium' => $data['is_premium'] ?? false,
                 'is_active' => false,
+                'is_processed' => false,
                 'video_path' => '',
                 'thumbnail_path' => '',
             ];
 
             $video = $this->videoRepository->create($videoData);
 
-            // 2. Kategorileri ekle
+            // 3. Kategorileri ekle
             if (!empty($data['category_ids'])) {
                 $this->videoRepository->syncCategories($video, $data['category_ids']);
+                Log::info('Kategoriler eklendi', [
+                    'video_id' => $video->id,
+                    'categories' => $data['category_ids']
+                ]);
             }
 
-            // 3. Etiketleri ekle
+            // 4. Etiketleri ekle
             if (!empty($data['tag_ids'])) {
                 $this->videoRepository->syncTags($video, $data['tag_ids']);
+                Log::info('Etiketler eklendi', [
+                    'video_id' => $video->id,
+                    'tags' => $data['tag_ids']
+                ]);
             }
 
-            // 4. Video dosyasını işle
-            if ($videoFile) {
-                $tempVideoPath = $videoFile->store('videos/temp');
-                $video->dispatchVideoUpload($tempVideoPath);
+            // 5. Job'ları dispatch et - DOĞRUDAN DISPATCH
+            if ($tempVideoPath) {
+                ProcessVideoUpload::dispatch($video, $tempVideoPath)->onQueue('default');
+                Log::info('Video upload job başlatıldı', ['video_id' => $video->id]);
             }
 
-            // 5. Thumbnail işle
-            if ($thumbnailFile) {
-                $tempThumbnailPath = $thumbnailFile->store('thumbnails/temp');
-                $video->dispatchThumbnailUpload($tempThumbnailPath);
-            } elseif ($videoFile) {
-                // Video varsa otomatik thumbnail oluştur
-                $video->dispatchThumbnailGeneration();
+            if ($tempThumbnailPath) {
+                ProcessThumbnailUpload::dispatch($video, $tempThumbnailPath)->onQueue('default');
+                Log::info('Thumbnail upload job başlatıldı', ['video_id' => $video->id]);
+            } elseif ($tempVideoPath) {
+                GenerateThumbnail::dispatch($video)->onQueue('default');
+                Log::info('Thumbnail generation job başlatıldı', ['video_id' => $video->id]);
             }
 
-            // 6. Video optimize et
-            if ($videoFile) {
-                $video->dispatchOptimization();
+            if ($tempVideoPath) {
+                OptimizeVideo::dispatch($video)->onQueue('default');
+                Log::info('Video optimization job başlatıldı', ['video_id' => $video->id]);
             }
 
             DB::commit();
 
             Log::info('Video başarıyla oluşturuldu', [
                 'video_id' => $video->id,
-                'title' => $video->title
+                'title' => $video->title,
+                'temp_video_path' => $tempVideoPath
             ]);
 
             return $video;
 
         } catch (\Exception $e) {
             DB::rollBack();
+
+            // Hata durumunda geçici dosyaları temizle
+            if (isset($tempVideoPath) && Storage::exists($tempVideoPath)) {
+                Storage::delete($tempVideoPath);
+            }
+            if (isset($tempThumbnailPath) && Storage::exists($tempThumbnailPath)) {
+                Storage::delete($tempThumbnailPath);
+            }
 
             Log::error('Video oluşturma hatası', [
                 'error' => $e->getMessage(),
@@ -116,7 +158,7 @@ class VideoService implements VideoServiceInterface
                 'description' => $data['description'] ?? null,
                 'is_premium' => $data['is_premium'] ?? false,
                 'is_active' => $data['is_active'] ?? $video->is_active,
-                'orientation' => $data['orientation'] ?? $video->orientation,
+                // orientation kaldırıldı - sadece video dosyası değişirse yeniden hesaplanacak
             ];
 
             $this->videoRepository->update($video, $updateData);
@@ -127,16 +169,19 @@ class VideoService implements VideoServiceInterface
                 $this->videoRepository->deleteFiles($video);
 
                 // Geçici klasöre yükle ve job başlat
-                $tempVideoPath = $videoFile->store('videos/temp');
-                $this->videoRepository->update($video, ['is_active' => false]);
-                $video->dispatchVideoUpload($tempVideoPath);
-                $video->dispatchOptimization();
+                $tempVideoPath = $videoFile->store('videos/temp', 'public');
+                $this->videoRepository->update($video, [
+                    'is_active' => false,
+                    'orientation' => null // Yeni video için orientation sıfırla
+                ]);
+                ProcessVideoUpload::dispatch($video, $tempVideoPath)->onQueue('default');
+                OptimizeVideo::dispatch($video)->onQueue('default');
             }
 
             // 3. Yeni thumbnail yüklendiyse
             if ($thumbnailFile) {
-                $tempThumbnailPath = $thumbnailFile->store('thumbnails/temp');
-                $video->dispatchThumbnailUpload($tempThumbnailPath);
+                $tempThumbnailPath = $thumbnailFile->store('thumbnails/temp', 'public');
+                ProcessThumbnailUpload::dispatch($video, $tempThumbnailPath)->onQueue('default');
             }
 
             // 4. Kategorileri güncelle
@@ -242,7 +287,7 @@ class VideoService implements VideoServiceInterface
             throw new \Exception('Video dosyası bulunamadı!');
         }
 
-        $video->dispatchThumbnailGeneration($timeInSeconds);
+        GenerateThumbnail::dispatch($video, $timeInSeconds)->onQueue('default');
     }
 
     public function getStatistics(): array

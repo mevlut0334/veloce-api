@@ -62,13 +62,13 @@ class ProcessVideoUpload implements ShouldQueue
                 'temp_path' => $this->tempVideoPath
             ]);
 
-            // 1. Geçici dosyanın var olduğunu kontrol et
-            if (!Storage::exists($this->tempVideoPath)) {
+            // 1. Geçici dosyanın var olduğunu kontrol et (PUBLIC disk'te)
+            if (!Storage::disk('public')->exists($this->tempVideoPath)) {
                 throw new Exception("Geçici video dosyası bulunamadı: {$this->tempVideoPath}");
             }
 
             // 2. Dosya boyutunu kontrol et
-            $fileSize = Storage::size($this->tempVideoPath);
+            $fileSize = Storage::disk('public')->size($this->tempVideoPath);
             if ($fileSize === 0) {
                 throw new Exception("Video dosyası boş");
             }
@@ -78,28 +78,22 @@ class ProcessVideoUpload implements ShouldQueue
             $newFileName = $this->generateUniqueFileName($extension);
             $finalPath = "{$this->targetFolder}/{$newFileName}";
 
-            // 4. Dosyayı hedef klasöre taşı
-            if (!Storage::move($this->tempVideoPath, $finalPath)) {
+            // 4. Dosyayı hedef klasöre taşı (public disk içinde)
+            if (!Storage::disk('public')->move($this->tempVideoPath, $finalPath)) {
                 throw new Exception("Video dosyası taşınamadı");
             }
 
             // 5. Video modelini güncelle
             $this->video->update([
                 'video_path' => $finalPath,
-                'is_active' => true, // İşlem tamamlandı, aktif yap
+                'is_processed' => true, // İşleme tamamlandı
             ]);
-
-            // 6. Cache temizleme (varsa)
-            // Cache::forget("video_{$this->video->id}");
 
             Log::info("Video işleme tamamlandı", [
                 'video_id' => $this->video->id,
                 'final_path' => $finalPath,
                 'file_size' => $fileSize
             ]);
-
-            // 7. (Opsiyonel) Video optimize job'u tetikle
-            // OptimizeVideo::dispatch($this->video);
 
         } catch (Exception $e) {
             Log::error("Video işleme hatası", [
@@ -109,12 +103,9 @@ class ProcessVideoUpload implements ShouldQueue
             ]);
 
             // Geçici dosyayı temizle
-            if (Storage::exists($this->tempVideoPath)) {
-                Storage::delete($this->tempVideoPath);
+            if (Storage::disk('public')->exists($this->tempVideoPath)) {
+                Storage::disk('public')->delete($this->tempVideoPath);
             }
-
-            // Video'yu inactive yap
-            $this->video->update(['is_active' => false]);
 
             throw $e; // Job failed olarak işaretlensin
         }
@@ -144,17 +135,13 @@ class ProcessVideoUpload implements ShouldQueue
         ]);
 
         // Geçici dosyayı temizle
-        if (Storage::exists($this->tempVideoPath)) {
-            Storage::delete($this->tempVideoPath);
+        if (Storage::disk('public')->exists($this->tempVideoPath)) {
+            Storage::disk('public')->delete($this->tempVideoPath);
         }
 
-        // Video'yu inactive yap ve hata mesajı ekle
+        // Video'yu inactive yap
         $this->video->update([
             'is_active' => false,
-            // 'error_message' => $exception->getMessage() // Eğer bu kolon varsa
         ]);
-
-        // (Opsiyonel) Admin'e bildirim gönder
-        // Notification::send(User::admins(), new VideoProcessingFailed($this->video));
     }
 }

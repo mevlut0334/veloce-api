@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -39,7 +40,6 @@ class Video extends Model
     protected function casts(): array
     {
         return [
-            'orientation' => 'boolean', // 0=horizontal, 1=vertical (database)
             'is_premium' => 'boolean',
             'is_active' => 'boolean',
             'is_processed' => 'boolean',
@@ -53,7 +53,7 @@ class Video extends Model
     }
 
     // Resource'larda otomatik kullanılacak accessor'lar
-    protected $appends = [];
+    protected $appends = ['duration_human', 'video_url', 'thumbnail_url', 'file_size_human'];
 
     // Orientation sabitleri
     public const ORIENTATION_HORIZONTAL = 0; // Database değeri
@@ -68,35 +68,24 @@ class Video extends Model
     public const MAX_FILE_SIZE_BYTES = self::MAX_FILE_SIZE_MB * 1024 * 1024;
 
     // =========================================================================
-    // ORIENTATION ACCESSOR/MUTATOR
+    // ORIENTATION ATTRIBUTE (Laravel 12 Syntax)
     // =========================================================================
 
     /**
-     * Orientation getter - Database'den boolean alır, string döner
-     * API'de "horizontal" veya "vertical" olarak gösterilir
+     * Orientation attribute
+     * GET: Database'den integer alır, string döner ("horizontal" veya "vertical")
+     * SET: String veya integer alır, database'e integer kaydeder (0 veya 1)
      */
-    public function getOrientationAttribute($value): string
+    protected function orientation(): Attribute
     {
-        return $value === self::ORIENTATION_VERTICAL
-            ? self::ORIENTATION_VERTICAL_STRING
-            : self::ORIENTATION_HORIZONTAL_STRING;
-    }
-
-    /**
-     * Orientation setter - String alır, boolean kaydeder
-     * Form'dan "horizontal"/"vertical" gelir, 0/1 olarak saklanır
-     */
-    public function setOrientationAttribute($value): void
-    {
-        // String olarak gelirse
-        if (is_string($value)) {
-            $this->attributes['orientation'] =
-                $value === self::ORIENTATION_VERTICAL_STRING ? self::ORIENTATION_VERTICAL : self::ORIENTATION_HORIZONTAL;
-            return;
-        }
-
-        // Boolean/Integer olarak gelirse
-        $this->attributes['orientation'] = (int) $value;
+        return Attribute::make(
+            get: fn ($value) => $value === self::ORIENTATION_VERTICAL
+                ? self::ORIENTATION_VERTICAL_STRING
+                : self::ORIENTATION_HORIZONTAL_STRING,
+            set: fn ($value) => is_string($value)
+                ? ($value === self::ORIENTATION_VERTICAL_STRING ? self::ORIENTATION_VERTICAL : self::ORIENTATION_HORIZONTAL)
+                : (int) $value,
+        );
     }
 
     // =========================================================================
@@ -106,66 +95,70 @@ class Video extends Model
     /**
      * Tam video URL'i döndürür
      */
-    public function getVideoUrlAttribute(): ?string
+    protected function videoUrl(): Attribute
     {
-        if (!$this->video_path) {
-            return null;
-        }
-
-        return Storage::url($this->video_path);
+        return Attribute::make(
+            get: fn () => $this->video_path ? Storage::url($this->video_path) : null,
+        );
     }
 
     /**
      * Tam thumbnail URL'i döndürür
      */
-    public function getThumbnailUrlAttribute(): ?string
+    protected function thumbnailUrl(): Attribute
     {
-        if (!$this->thumbnail_path) {
-            return null;
-        }
-
-        return Storage::url($this->thumbnail_path);
+        return Attribute::make(
+            get: fn () => $this->thumbnail_path ? Storage::url($this->thumbnail_path) : null,
+        );
     }
 
     /**
      * İnsan okunabilir süre formatı: "5:30" veya "1:23:45"
      */
-    public function getDurationHumanAttribute(): string
+    protected function durationHuman(): Attribute
     {
-        if (!$this->duration) {
-            return '0:00';
-        }
+        return Attribute::make(
+            get: function () {
+                if (!$this->duration) {
+                    return '0:00';
+                }
 
-        $hours = floor($this->duration / 3600);
-        $minutes = floor(($this->duration % 3600) / 60);
-        $seconds = $this->duration % 60;
+                $hours = floor($this->duration / 3600);
+                $minutes = floor(($this->duration % 3600) / 60);
+                $seconds = $this->duration % 60;
 
-        if ($hours > 0) {
-            return sprintf('%d:%02d:%02d', $hours, $minutes, $seconds);
-        }
+                if ($hours > 0) {
+                    return sprintf('%d:%02d:%02d', $hours, $minutes, $seconds);
+                }
 
-        return sprintf('%d:%02d', $minutes, $seconds);
+                return sprintf('%d:%02d', $minutes, $seconds);
+            }
+        );
     }
 
     /**
      * İnsan okunabilir dosya boyutu: "15.5 MB"
      */
-    public function getFileSizeHumanAttribute(): ?string
+    protected function fileSizeHuman(): Attribute
     {
-        if (!$this->file_size) {
-            return null;
-        }
+        return Attribute::make(
+            get: function () {
+                if (!$this->file_size) {
+                    return null;
+                }
 
-        $units = ['B', 'KB', 'MB', 'GB'];
-        $size = $this->file_size;
-        $unit = 0;
+                $units = ['B', 'KB', 'MB', 'GB'];
+                $size = $this->file_size;
+                $unit = 0;
 
-        while ($size >= 1024 && $unit < count($units) - 1) {
-            $size /= 1024;
-            $unit++;
-        }
+                while ($size >= 1024 && $unit < count($units) - 1) {
+                    $size /= 1024;
+                    $unit++;
+                }
 
-        return round($size, 2) . ' ' . $units[$unit];
+                return round($size, 2) . ' ' . $units[$unit];
+            }
+        );
     }
 
     // =========================================================================
@@ -241,23 +234,9 @@ class Video extends Model
     }
 
     // =========================================================================
-    // ESKİ METODLAR (Geriye dönük uyumluluk için)
+    // ESKİ METODLAR KALDIRILDI - Artık Attribute olarak çalışıyorlar
+    // $video->video_url, $video->thumbnail_url, $video->duration_human kullanın
     // =========================================================================
-
-    public function videoUrl(): string
-    {
-        return $this->video_url ?? '';
-    }
-
-    public function thumbnailUrl(): string
-    {
-        return $this->thumbnail_url ?? '';
-    }
-
-    public function formattedDuration(): string
-    {
-        return $this->duration_human;
-    }
 
     // =========================================================================
     // SCOPES
@@ -279,7 +258,7 @@ class Video extends Model
     }
 
     /**
-     * Yatay videolar (boolean ile karşılaştırma - PERFORMANSLI)
+     * Yatay videolar (integer ile karşılaştırma)
      */
     public function scopeHorizontal($query)
     {
@@ -287,7 +266,7 @@ class Video extends Model
     }
 
     /**
-     * Dikey videolar (boolean ile karşılaştırma - PERFORMANSLI)
+     * Dikey videolar (integer ile karşılaştırma)
      */
     public function scopeVertical($query)
     {
@@ -446,19 +425,21 @@ class Video extends Model
     }
 
     /**
-     * Orientation helper - Boolean kontrolü
+     * Orientation helper - RAW database değerini kontrol eder
+     * NOT: Attribute üzerinden değil, getRawOriginal() kullanılmalı
      */
     public function isHorizontal(): bool
     {
-        return $this->attributes['orientation'] === self::ORIENTATION_HORIZONTAL;
+        return $this->getRawOriginal('orientation') === self::ORIENTATION_HORIZONTAL;
     }
 
     /**
-     * Orientation helper - Boolean kontrolü
+     * Orientation helper - RAW database değerini kontrol eder
+     * NOT: Attribute üzerinden değil, getRawOriginal() kullanılmalı
      */
     public function isVertical(): bool
     {
-        return $this->attributes['orientation'] === self::ORIENTATION_VERTICAL;
+        return $this->getRawOriginal('orientation') === self::ORIENTATION_VERTICAL;
     }
 
     // =========================================================================
@@ -506,7 +487,7 @@ class Video extends Model
 
         return static::active()
             ->where('id', '!=', $this->id)
-            ->where('orientation', $this->attributes['orientation']) // RAW boolean kullan
+            ->where('orientation', $this->getRawOriginal('orientation')) // RAW integer kullan
             ->when($categoryIds->isNotEmpty(), function($query) use ($categoryIds) {
                 $query->whereHas('categories', function($q) use ($categoryIds) {
                     $q->whereIn('categories.id', $categoryIds);
@@ -546,7 +527,7 @@ class Video extends Model
             }
 
             // Orientation default: horizontal
-            if (is_null($video->orientation)) {
+            if (is_null($video->getRawOriginal('orientation'))) {
                 $video->orientation = self::ORIENTATION_HORIZONTAL;
             }
         });

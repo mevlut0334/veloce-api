@@ -36,11 +36,13 @@ class VideosTable
                     ->label('Süre')
                     ->alignCenter()
                     ->badge()
-                    ->color('gray'),
+                    ->color('gray')
+                    ->state(fn (Video $record): string => $record->duration_human), // Manuel state
 
                 TextColumn::make('orientation')
                     ->label('Yönelim')
                     ->badge()
+                    ->state(fn (Video $record): string => $record->orientation) // Manuel state
                     ->formatStateUsing(fn (string $state): string => match($state) {
                         'horizontal' => 'Yatay',
                         'vertical' => 'Dikey',

@@ -64,23 +64,10 @@ class VideoForm
 
                 Section::make('Video Özellikleri')
                     ->schema([
-                        Group::make([
-                            Select::make('orientation')
-                                ->label('Yönelim')
-                                ->options([
-                                    Video::ORIENTATION_HORIZONTAL_STRING => 'Yatay (Horizontal)',
-                                    Video::ORIENTATION_VERTICAL_STRING => 'Dikey (Vertical)',
-                                ])
-                                ->default(Video::ORIENTATION_HORIZONTAL_STRING)
-                                ->required()
-                                ->native(false)
-                                ->helperText('Video ekran yönelimi'),
-
-                            Toggle::make('is_premium')
-                                ->label('Premium İçerik')
-                                ->default(false)
-                                ->helperText('Sadece premium üyeler izleyebilir'),
-                        ])->columns(2),
+                        Toggle::make('is_premium')
+                            ->label('Premium İçerik')
+                            ->default(false)
+                            ->helperText('Sadece premium üyeler izleyebilir'),
                     ]),
 
                 Section::make('Kategoriler ve Etiketler')

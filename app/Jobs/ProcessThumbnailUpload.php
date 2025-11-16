@@ -38,11 +38,12 @@ class ProcessThumbnailUpload implements ShouldQueue
                 'temp_path' => $this->tempThumbnailPath
             ]);
 
-            if (!Storage::exists($this->tempThumbnailPath)) {
+            // PUBLIC disk'te kontrol et
+            if (!Storage::disk('public')->exists($this->tempThumbnailPath)) {
                 throw new Exception("Geçici thumbnail dosyası bulunamadı: {$this->tempThumbnailPath}");
             }
 
-            $fileSize = Storage::size($this->tempThumbnailPath);
+            $fileSize = Storage::disk('public')->size($this->tempThumbnailPath);
             if ($fileSize === 0) {
                 throw new Exception("Thumbnail dosyası boş");
             }
@@ -51,7 +52,8 @@ class ProcessThumbnailUpload implements ShouldQueue
             $newFileName = $this->generateUniqueFileName($extension);
             $finalPath = "{$this->targetFolder}/{$newFileName}";
 
-            if (!Storage::move($this->tempThumbnailPath, $finalPath)) {
+            // PUBLIC disk'te taşı
+            if (!Storage::disk('public')->move($this->tempThumbnailPath, $finalPath)) {
                 throw new Exception("Thumbnail dosyası taşınamadı");
             }
 
@@ -72,8 +74,8 @@ class ProcessThumbnailUpload implements ShouldQueue
                 'trace' => $e->getTraceAsString()
             ]);
 
-            if (Storage::exists($this->tempThumbnailPath)) {
-                Storage::delete($this->tempThumbnailPath);
+            if (Storage::disk('public')->exists($this->tempThumbnailPath)) {
+                Storage::disk('public')->delete($this->tempThumbnailPath);
             }
 
             throw $e;
@@ -97,8 +99,8 @@ class ProcessThumbnailUpload implements ShouldQueue
             'error' => $exception->getMessage()
         ]);
 
-        if (Storage::exists($this->tempThumbnailPath)) {
-            Storage::delete($this->tempThumbnailPath);
+        if (Storage::disk('public')->exists($this->tempThumbnailPath)) {
+            Storage::disk('public')->delete($this->tempThumbnailPath);
         }
     }
 }
