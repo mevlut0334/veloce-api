@@ -39,7 +39,12 @@ class HomeSectionForm
                                 ])
                                 ->required()
                                 ->live()
-                                ->afterStateUpdated(fn ($state, callable $set) => $set('content_data', []))
+                                ->afterStateUpdated(function ($state, callable $set) {
+                                    // Content type değiştiğinde ilgili alanları temizle
+                                    $set('video_ids', null);
+                                    $set('category_id', null);
+                                    $set('days', null);
+                                })
                                 ->helperText('İçeriğin nasıl seçileceğini belirler'),
 
                             TextInput::make('limit')
@@ -62,7 +67,7 @@ class HomeSectionForm
                 Section::make('İçerik Ayarları')
                     ->schema([
                         // Manuel Video Seçimi (TYPE_VIDEO_IDS)
-                        Select::make('content_data.video_ids')
+                        Select::make('video_ids')
                             ->label('Videolar')
                             ->multiple()
                             ->searchable()
@@ -73,13 +78,13 @@ class HomeSectionForm
                                     ->orderBy('title')
                                     ->pluck('title', 'id');
                             })
-                            ->required()
+                            ->required(fn ($get) => $get('content_type') === HomeSection::TYPE_VIDEO_IDS)
                             ->visible(fn ($get) => $get('content_type') === HomeSection::TYPE_VIDEO_IDS)
                             ->helperText('Sıralamayı korumak için videoları istediğiniz sırada seçin')
                             ->columnSpanFull(),
 
                         // Kategori Seçimi (TYPE_CATEGORY)
-                        Select::make('content_data.category_id')
+                        Select::make('category_id')
                             ->label('Kategori')
                             ->searchable()
                             ->preload()
@@ -88,19 +93,19 @@ class HomeSectionForm
                                     ->orderBy('name')
                                     ->pluck('name', 'id');
                             })
-                            ->required()
+                            ->required(fn ($get) => $get('content_type') === HomeSection::TYPE_CATEGORY)
                             ->visible(fn ($get) => $get('content_type') === HomeSection::TYPE_CATEGORY)
                             ->helperText('Seçilen kategorideki tüm videolar gösterilir')
                             ->columnSpanFull(),
 
                         // Trend Videolar Ayarları (TYPE_TRENDING)
-                        TextInput::make('content_data.days')
+                        TextInput::make('days')
                             ->label('Gün Sayısı')
                             ->numeric()
                             ->default(7)
                             ->minValue(1)
                             ->maxValue(365)
-                            ->required()
+                            ->required(fn ($get) => $get('content_type') === HomeSection::TYPE_TRENDING)
                             ->visible(fn ($get) => $get('content_type') === HomeSection::TYPE_TRENDING)
                             ->helperText('Son kaç günün trend videolarını göster')
                             ->columnSpanFull(),
