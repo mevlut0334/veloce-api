@@ -62,51 +62,48 @@ class User extends Authenticatable implements FilamentUser
     // İLİŞKİLER - Optimize Edilmiş
     // ============================================
 
-    public function userSubscriptions(): HasMany
-    {
-        return $this->hasMany(UserSubscription::class)
-            ->select(['id', 'user_id', 'plan_id', 'status', 'starts_at', 'expires_at']);
-    }
+    // ============================================
+// İLİŞKİLER - Optimize Edilmiş
+// ============================================
 
-    public function subscription(): HasOne
-    {
-        return $this->hasOne(UserSubscription::class)
-            ->select(['id', 'user_id', 'plan_id', 'status', 'starts_at', 'expires_at'])
-            ->latest('created_at');
-    }
+public function userSubscriptions(): HasMany
+{
+    return $this->hasMany(UserSubscription::class);
+}
 
-    public function activeSubscription(): HasOne
-    {
-        return $this->hasOne(UserSubscription::class)
-            ->select(['id', 'user_id', 'plan_id', 'status', 'starts_at', 'expires_at'])
-            ->where('status', 'active')
-            ->where('expires_at', '>', now());
-    }
+public function subscription(): HasOne
+{
+    return $this->hasOne(UserSubscription::class)
+        ->latest('created_at');
+}
 
-    public function payments(): HasMany
-    {
-        return $this->hasMany(Payment::class)
-            ->select(['id', 'user_id', 'amount', 'status', 'created_at']);
-    }
+public function activeSubscription(): HasOne
+{
+    return $this->hasOne(UserSubscription::class)
+        ->where('status', 'active')
+        ->where('expires_at', '>', now());
+}
 
-    public function playlists(): HasMany
-    {
-        return $this->hasMany(UserPlaylist::class)
-            ->select(['id', 'user_id', 'name', 'created_at']);
-    }
+public function payments(): HasMany
+{
+    return $this->hasMany(Payment::class);
+}
 
-    public function favorites(): BelongsToMany
-    {
-        return $this->belongsToMany(Video::class, 'user_favorites')
-            ->select(['videos.id', 'title', 'slug', 'thumbnail'])
-            ->withTimestamps();
-    }
+public function playlists(): HasMany
+{
+    return $this->hasMany(UserPlaylist::class);
+}
 
-    public function views(): HasMany
-    {
-        return $this->hasMany(VideoView::class)
-            ->select(['id', 'user_id', 'video_id', 'viewed_at', 'watch_duration']);
-    }
+public function favorites(): BelongsToMany
+{
+    return $this->belongsToMany(Video::class, 'user_favorites')
+        ->withTimestamps();
+}
+
+public function views(): HasMany
+{
+    return $this->hasMany(VideoView::class);
+}
 
     // ============================================
     // SCOPE'LAR - Performans Optimizasyonlu
