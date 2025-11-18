@@ -25,6 +25,7 @@ class User extends Authenticatable implements FilamentUser
         'name',
         'email',
         'password',
+        'avatar',
         'is_active',
         'is_admin',
         'last_activity_at',
@@ -162,6 +163,59 @@ class User extends Authenticatable implements FilamentUser
         return $query->where('last_activity_at', '>', now()->subDays($days));
     }
 
+    /**
+     * Bu ay abone olanlar
+     */
+    public function scopeSubscribedThisMonth(Builder $query): Builder
+    {
+        return $query->whereHas('userSubscriptions', function ($q) {
+            $q->whereBetween('starts_at', [
+                now()->startOfMonth(),
+                now()->endOfMonth()
+            ]);
+        });
+    }
+
+    /**
+     * Bu hafta abone olanlar
+     */
+    public function scopeSubscribedThisWeek(Builder $query): Builder
+    {
+        return $query->whereHas('userSubscriptions', function ($q) {
+            $q->whereBetween('starts_at', [
+                now()->startOfWeek(),
+                now()->endOfWeek()
+            ]);
+        });
+    }
+
+    /**
+     * Aboneliği yakında bitecekler (N gün içinde)
+     */
+    public function scopeSubscriptionExpiringSoon(Builder $query, int $days = 30): Builder
+    {
+        return $query->whereHas('activeSubscription', function ($q) use ($days) {
+            $q->whereBetween('expires_at', [
+                now(),
+                now()->addDays($days)
+            ]);
+        });
+    }
+
+    /**
+     * Aboneliği geçen ay biten kullanıcılar
+     */
+    public function scopeSubscriptionExpiredLastMonth(Builder $query): Builder
+    {
+        return $query->whereHas('userSubscriptions', function ($q) {
+            $q->where('status', 'expired')
+                ->whereBetween('expires_at', [
+                    now()->subMonth()->startOfMonth(),
+                    now()->subMonth()->endOfMonth()
+                ]);
+        });
+    }
+
     // ============================================
     // HELPER METODLAR - Cache ile Optimize Edilmiş
     // ============================================
@@ -240,23 +294,61 @@ class User extends Authenticatable implements FilamentUser
         return max(0, (int) $days);
     }
 
+    /**
+     * Abonelik durumu badge için renk döndürür
+     */
+    public function getSubscriptionBadgeColor(): string
+    {
+        return match($this->subscriptionStatus()) {
+            'active' => 'success',
+            'expired' => 'danger',
+            'none' => 'gray',
+            default => 'gray'
+        };
+    }
+
+    /**
+     * Abonelik durumu badge için metin döndürür
+     */
+    public function getSubscriptionBadgeText(): string
+    {
+        return match($this->subscriptionStatus()) {
+            'active' => 'Aktif Abone',
+            'expired' => 'Süresi Dolmuş',
+            'none' => 'Abone Değil',
+            default => 'Bilinmiyor'
+        };
+    }
+
+    /**
+     * Kullanıcının tüm abonelik cache'lerini temizler
+     */
     public function clearSubscriptionCache(): void
     {
         Cache::forget("user_{$this->id}_is_subscriber");
         Cache::forget("user_{$this->id}_subscription_status");
+        Cache::forget("user_{$this->id}_stats");
     }
 
+    /**
+     * Abonelik verilerini eager load eder
+     */
     public function loadSubscriptionData(): self
     {
         return $this->load([
-            'activeSubscription' => fn($q) => $q->select(['id', 'user_id', 'plan_id', 'status', 'expires_at'])
+            'activeSubscription' => fn($q) => $q
+                ->select(['id', 'user_id', 'plan_id', 'status', 'starts_at', 'expires_at'])
+                ->with('plan:id,name,price,duration_days')
         ]);
     }
 
+    /**
+     * Dashboard için gerekli tüm verileri yükler
+     */
     public function loadDashboardData(): self
     {
         return $this->load([
-            'activeSubscription:id,user_id,plan_id,status,expires_at',
+            'activeSubscription:id,user_id,plan_id,status,starts_at,expires_at',
             'playlists:id,user_id,name,created_at',
             'favorites:id,title,slug,thumbnail'
         ]);
@@ -304,5 +396,21 @@ class User extends Authenticatable implements FilamentUser
             ->latest('viewed_at')
             ->limit($limit)
             ->get();
+    }
+
+    /**
+     * Kullanıcının kayıt tarihinden itibaren geçen gün sayısı
+     */
+    public function getMembershipDays(): int
+    {
+        return $this->created_at->diffInDays(now());
+    }
+
+    /**
+     * Son aktivite tarihi formatlanmış
+     */
+    public function getLastActivityFormatted(): ?string
+    {
+        return $this->last_activity_at?->diffForHumans();
     }
 }

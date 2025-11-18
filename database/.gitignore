@@ -1,1 +1,35 @@
-*.sqlite*
+# IDE Helper dosyaları
+_ide_helper.php
+_ide_helper_models.php
+.phpstorm.meta.php
+
+# SQLite veritabanları
+*.sqlite
+*.sqlite-journal
+
+# Laravel
+/node_modules
+/public/hot
+/public/storage
+/storage/*.key
+/vendor
+.env
+.env.backup
+.env.production
+.phpunit.result.cache
+Homestead.json
+Homestead.yaml
+auth.json
+npm-debug.log
+yarn-error.log
+
+# IDE - PhpStorm / VS Code
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

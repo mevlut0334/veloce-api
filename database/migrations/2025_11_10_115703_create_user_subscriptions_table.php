@@ -6,36 +6,37 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-    /**
-     * Run the migrations.
-     */
     public function up(): void
     {
         Schema::create('user_subscriptions', function (Blueprint $table) {
             $table->id();
             $table->foreignId('user_id')->constrained()->onDelete('cascade');
-            $table->foreignId('subscription_plan_id')->constrained()->onDelete('cascade');
-            $table->timestamp('started_at')->useCurrent();
+            $table->foreignId('plan_id')->constrained('subscription_plans')->onDelete('cascade');
+
+            $table->timestamp('starts_at')->useCurrent();
             $table->timestamp('expires_at')->nullable();
-            $table->enum('status', ['active', 'expired', 'cancelled'])->default('active');
+
+            $table->enum('status', ['active', 'expired', 'cancelled', 'pending'])->default('active');
+            $table->enum('subscription_type', ['manual', 'paid', 'trial'])->default('manual');
+
             $table->string('payment_method', 50)->nullable();
             $table->string('transaction_id', 100)->nullable()->unique();
+
+            // Admin tarafından oluşturuldu mu?
+            $table->foreignId('created_by')->nullable()->constrained('users')->nullOnDelete();
+            $table->text('admin_note')->nullable()->comment('Admin notu veya iptal sebebi');
+
             $table->timestamps();
 
-            // Composite indexes - en sık kullanılan sorgular için
+            // Indexes
             $table->index(['user_id', 'status']);
             $table->index(['user_id', 'expires_at']);
             $table->index(['status', 'expires_at']);
-
-            // Unique constraint - bir kullanıcının aynı anda sadece 1 aktif aboneliği
-            $table->unique(['user_id', 'status'], 'unique_active_subscription')
-                  ->where('status', 'active');
+            $table->index(['subscription_type']);
+            $table->index(['starts_at']);
         });
     }
 
-    /**
-     * Reverse the migrations.
-     */
     public function down(): void
     {
         Schema::dropIfExists('user_subscriptions');
