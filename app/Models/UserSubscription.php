@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
 
 class UserSubscription extends Model
@@ -194,6 +195,9 @@ class UserSubscription extends Model
         ]);
 
         if ($updated) {
+            // Users tablosunu güncelle
+            $this->syncToUserTable();
+
             $this->clearUserCache();
             $this->refresh();
 
@@ -233,6 +237,9 @@ class UserSubscription extends Model
         ]);
 
         if ($updated) {
+            // Users tablosunu güncelle
+            $this->syncToUserTable();
+
             $this->clearUserCache();
             $this->refresh();
 
@@ -269,6 +276,9 @@ class UserSubscription extends Model
         ]);
 
         if ($updated) {
+            // Users tablosunu güncelle (abone değil olarak)
+            $this->syncToUserTable();
+
             $this->clearUserCache();
             $this->refresh();
 
@@ -291,6 +301,9 @@ class UserSubscription extends Model
             $updated = $this->update(['status' => self::STATUS_EXPIRED]);
 
             if ($updated) {
+                // Users tablosunu güncelle (süresi dolmuş olarak)
+                $this->syncToUserTable();
+
                 $this->clearUserCache();
                 $this->refresh();
             }
@@ -320,6 +333,55 @@ class UserSubscription extends Model
     }
 
     /**
+     * User tablosundaki abonelik alanlarını senkronize et
+     */
+    protected function syncToUserTable(): void
+    {
+        if (!$this->user_id) {
+            return;
+        }
+
+        try {
+            // Aktif abonelik varsa
+            if ($this->isActive()) {
+                DB::table('users')
+                    ->where('id', $this->user_id)
+                    ->update([
+                        'subscription_type' => 1, // Premium
+                        'subscription_starts_at' => $this->starts_at,
+                        'subscription_ends_at' => $this->expires_at,
+                    ]);
+
+                Log::info('User table synced with active subscription', [
+                    'user_id' => $this->user_id,
+                    'subscription_id' => $this->id,
+                ]);
+            }
+            // İptal edilmiş veya süresi dolmuş abonelik
+            else {
+                DB::table('users')
+                    ->where('id', $this->user_id)
+                    ->update([
+                        'subscription_type' => 0, // Free
+                        'subscription_starts_at' => null,
+                        'subscription_ends_at' => null,
+                    ]);
+
+                Log::info('User table synced with inactive subscription', [
+                    'user_id' => $this->user_id,
+                    'subscription_id' => $this->id,
+                ]);
+            }
+        } catch (\Exception $e) {
+            Log::error('Failed to sync user table', [
+                'user_id' => $this->user_id,
+                'subscription_id' => $this->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
      * Kullanıcının abonelik cache'lerini temizle
      */
     protected function clearUserCache(): void
@@ -346,21 +408,29 @@ class UserSubscription extends Model
             ->count();
 
         if ($expiredCount > 0) {
-            self::where('status', self::STATUS_ACTIVE)
+            // Süresi dolan abonelikleri al
+            $expiredSubscriptions = self::where('status', self::STATUS_ACTIVE)
                 ->where('expires_at', '<=', now())
-                ->update(['status' => self::STATUS_EXPIRED]);
+                ->get();
+
+            // Her birini güncelle (syncToUserTable çağrılacak)
+            foreach ($expiredSubscriptions as $subscription) {
+                $subscription->update(['status' => self::STATUS_EXPIRED]);
+            }
 
             // Etkilenen kullanıcıların cache'lerini temizle
-            $userIds = self::where('status', self::STATUS_EXPIRED)
-                ->where('expires_at', '<=', now())
-                ->pluck('user_id')
-                ->unique();
+            $userIds = $expiredSubscriptions->pluck('user_id')->unique();
 
             foreach ($userIds as $userId) {
                 Cache::forget("user_{$userId}_is_subscriber");
                 Cache::forget("user_{$userId}_subscription_status");
                 Cache::forget("user_{$userId}_active_subscription");
             }
+
+            Log::info('Expired old subscriptions', [
+                'count' => $expiredCount,
+                'user_ids' => $userIds->toArray(),
+            ]);
         }
 
         return $expiredCount;
@@ -427,12 +497,40 @@ class UserSubscription extends Model
             }
         });
 
+        static::created(function ($subscription) {
+            // Yeni abonelik oluşturulduğunda users tablosunu senkronize et
+            $subscription->syncToUserTable();
+        });
+
+        static::updated(function ($subscription) {
+            // Abonelik güncellendiğinde users tablosunu senkronize et
+            if ($subscription->wasChanged(['status', 'starts_at', 'expires_at'])) {
+                $subscription->syncToUserTable();
+            }
+        });
+
         static::saved(function ($subscription) {
             $subscription->clearUserCache();
             Cache::forget('user_subscriptions_stats');
         });
 
         static::deleted(function ($subscription) {
+            // Abonelik silindiğinde users tablosunu temizle
+            try {
+                DB::table('users')
+                    ->where('id', $subscription->user_id)
+                    ->update([
+                        'subscription_type' => 0,
+                        'subscription_starts_at' => null,
+                        'subscription_ends_at' => null,
+                    ]);
+            } catch (\Exception $e) {
+                Log::error('Failed to clear user table on subscription delete', [
+                    'user_id' => $subscription->user_id,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+
             $subscription->clearUserCache();
             Cache::forget('user_subscriptions_stats');
         });

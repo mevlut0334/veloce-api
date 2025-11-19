@@ -27,6 +27,7 @@ class DatabaseSeeder extends Seeder
         // Admin kullanıcı seeder'ını çalıştır
         $this->call([
             AdminUserSeeder::class,
+            SubscriptionPlanSeeder::class,
         ]);
     }
 }
