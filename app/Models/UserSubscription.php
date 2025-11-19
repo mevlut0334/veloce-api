@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Carbon\Carbon;
 
 class UserSubscription extends Model
@@ -177,13 +178,33 @@ class UserSubscription extends Model
 
     public function extend(int $days): bool
     {
+        $oldExpiry = $this->expires_at->copy();
+        $newExpiry = $oldExpiry->copy()->addDays($days);
+
+        Log::info('Extending subscription', [
+            'subscription_id' => $this->id,
+            'old_expiry' => $oldExpiry->toDateTimeString(),
+            'new_expiry' => $newExpiry->toDateTimeString(),
+            'days' => $days,
+        ]);
+
         $updated = $this->update([
-            'expires_at' => $this->expires_at->addDays($days),
+            'expires_at' => $newExpiry,
             'status' => self::STATUS_ACTIVE,
         ]);
 
         if ($updated) {
             $this->clearUserCache();
+            $this->refresh();
+
+            Log::info('Subscription extended successfully', [
+                'subscription_id' => $this->id,
+                'verified_expiry' => $this->expires_at->toDateTimeString(),
+            ]);
+        } else {
+            Log::error('Subscription extend failed', [
+                'subscription_id' => $this->id,
+            ]);
         }
 
         return $updated;
@@ -195,15 +216,34 @@ class UserSubscription extends Model
             ? $this->expires_at
             : now();
 
+        $newExpiry = $startDate->copy()->addDays($durationDays);
+
+        Log::info('Renewing subscription', [
+            'subscription_id' => $this->id,
+            'start_date' => now()->toDateTimeString(),
+            'new_expiry' => $newExpiry->toDateTimeString(),
+            'duration_days' => $durationDays,
+        ]);
+
         $updated = $this->update([
             'starts_at' => now(),
-            'expires_at' => $startDate->addDays($durationDays),
+            'expires_at' => $newExpiry,
             'status' => self::STATUS_ACTIVE,
             'transaction_id' => $transactionId ?? $this->transaction_id,
         ]);
 
         if ($updated) {
             $this->clearUserCache();
+            $this->refresh();
+
+            Log::info('Subscription renewed successfully', [
+                'subscription_id' => $this->id,
+                'verified_expiry' => $this->expires_at->toDateTimeString(),
+            ]);
+        } else {
+            Log::error('Subscription renew failed', [
+                'subscription_id' => $this->id,
+            ]);
         }
 
         return $updated;
@@ -211,15 +251,35 @@ class UserSubscription extends Model
 
     public function cancel(?string $reason = null): bool
     {
+        $adminNote = $this->admin_note ?? '';
+        if ($reason) {
+            $note = "[" . now()->format('d.m.Y H:i') . "] İptal: " . $reason;
+            $adminNote = $adminNote ? $adminNote . "\n" . $note : $note;
+        }
+
+        Log::info('Cancelling subscription', [
+            'subscription_id' => $this->id,
+            'old_status' => $this->status,
+            'reason' => $reason,
+        ]);
+
         $updated = $this->update([
             'status' => self::STATUS_CANCELLED,
-            'admin_note' => $reason
-                ? ($this->admin_note ? $this->admin_note . "\n" . $reason : $reason)
-                : $this->admin_note,
+            'admin_note' => $adminNote,
         ]);
 
         if ($updated) {
             $this->clearUserCache();
+            $this->refresh();
+
+            Log::info('Subscription cancelled successfully', [
+                'subscription_id' => $this->id,
+                'verified_status' => $this->status,
+            ]);
+        } else {
+            Log::error('Subscription cancel failed', [
+                'subscription_id' => $this->id,
+            ]);
         }
 
         return $updated;
@@ -232,6 +292,7 @@ class UserSubscription extends Model
 
             if ($updated) {
                 $this->clearUserCache();
+                $this->refresh();
             }
 
             return $updated;
@@ -263,6 +324,12 @@ class UserSubscription extends Model
      */
     protected function clearUserCache(): void
     {
+        if ($this->user_id) {
+            Cache::forget("user_{$this->user_id}_is_subscriber");
+            Cache::forget("user_{$this->user_id}_subscription_status");
+            Cache::forget("user_{$this->user_id}_active_subscription");
+        }
+
         if ($this->user) {
             $this->user->clearSubscriptionCache();
         }
@@ -292,6 +359,7 @@ class UserSubscription extends Model
             foreach ($userIds as $userId) {
                 Cache::forget("user_{$userId}_is_subscriber");
                 Cache::forget("user_{$userId}_subscription_status");
+                Cache::forget("user_{$userId}_active_subscription");
             }
         }
 
